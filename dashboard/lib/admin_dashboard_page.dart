@@ -21,10 +21,10 @@ class CustomerData {
 
   factory CustomerData.fromJson(Map<String, dynamic> json) {
     return CustomerData(
-      customerName: json['customer_name'] ?? json['customerName'] ?? 'N/A', // Adjust based on your API
+      customerName: json['name'] ?? json['customer_name'] ?? json['customerName'] ?? 'N/A', // Prioritize 'name'
       dueDate: json['due_date'] ?? json['dueDate'] ?? 'N/A',
-      insuranceProvider: json['insurance_provider'] ?? json['insuranceProvider'] ?? 'N/A',
-      carModel: json['car_model'] ?? json['carModel'] ?? 'N/A',
+      insuranceProvider: json['insurer'] ?? json['insurance_provider'] ?? json['insuranceProvider'] ?? 'N/A',
+      carModel: json['model'] ?? json['carModel'] ?? 'N/A',
     );
   }
 }
@@ -132,14 +132,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           try {
             // Attempt to parse the date. Adjust format if needed.
             // Example: if dueDate is "dd/MM/yyyy", use DateFormat('dd/MM/yyyy')
-            final DateFormat apiDateFormat = DateFormat('yyyy-MM-dd'); // Assuming YYYY-MM-DD from API
+            final DateFormat apiDateFormat = DateFormat('dd.MM.yyyy'); // Corrected date format
             DateTime dueDate = apiDateFormat.parse(customer.dueDate);
             
             // Check if due date is in the future and within the next 30 days
             if (dueDate.isAfter(now) && dueDate.isBefore(thirtyDaysFromNow)) {
               upcomingDuesList.add(UpcomingDueInfo(
-                  customerName: customer.customerName,
-                  dueDate: DateFormat('dd MMM, yyyy').format(dueDate) // Format for display
+                  customerName: customer.customerName, // Name is added
+                  dueDate: DateFormat('dd MMM, yyyy').format(dueDate) // Formatted due date is added
               ));
             }
           } catch (e) {
@@ -177,7 +177,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         setState(() {
           _dashboardData = AdminDashboardProcessedData(
             upcomingDues: upcomingDuesList,
-            topInsurers: topInsurersList,
+            topInsurers: topInsurersList, // This list is populated here
             topCarModels: topCarModelsList,
           );
           _isLoading = false;
@@ -283,10 +283,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                   title: 'Top 3 Insurance Providers',
                                   icon: Icons.business_center_rounded,
                                   iconColor: Colors.blue[600]!,
-                                  content: _buildTopListContent(
+                                  content: _buildTopListContent( // This widget displays the top insurers
                                       _dashboardData!.topInsurers.isNotEmpty
                                           ? _dashboardData!.topInsurers
-                                          : ['No provider data'], 
+                                          : ['No provider data'], // Fallback if list is empty
                                       primaryGreen),
                                   backgroundColor: lightGreenBackground,
                                   borderColor: primaryGreen,
@@ -424,7 +424,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   Widget _buildTopListContent(List<String> items, Color textColor) {
     if (items.isEmpty || (items.length == 1 && (items[0] == 'No provider data' || items[0] == 'No model data'))) {
        return Text(
-        items.isNotEmpty ? items[0] : 'No data available.', // Show specific placeholder
+        items.isNotEmpty ? items[0] : 'No data available.', // Handles empty or placeholder
         textAlign: TextAlign.center,
         style: TextStyle(fontSize: 15, color: Colors.grey[700]),
       );
