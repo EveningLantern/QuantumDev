@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart'; // For date formatting
+import 'due_date_line_chart.dart'; // Import the new chart widget
 
 // Data model (similar to Customer model)
 class DataPoint {
@@ -36,22 +37,22 @@ class DataPoint {
       parsedDueDate = DateTime.now();
     } else {
       try {
-        // Attempt 1: Standard ISO 8601 parsing (e.g., "2023-10-26T10:00:00Z" or "2023-10-26")
-        parsedDueDate = DateTime.parse(rawDueDate);
-      } catch (e) {
-        // Attempt 2: Specific format (e.g., "dd/MM/yyyy" like "26/10/2023")
-        // YOU MUST ADJUST 'dd/MM/yyyy' TO MATCH YOUR ACTUAL API DATE FORMAT
-        // For example, if your date is "MM-dd-yyyy", use DateFormat('MM-dd-yyyy')
-        // If your date is "yyyy-MM-dd HH:mm:ss", use DateFormat('yyyy-MM-dd HH:mm:ss')
+        // Attempt 1: "dd.MM.yyyy" (as per example "17.05.2025")
+        parsedDueDate = DateFormat('dd.MM.yyyy').parse(rawDueDate);
+      } catch (e1) {
+        debugPrint('Failed to parse "$rawDueDate" with dd.MM.yyyy: $e1');
         try {
-          // Example: Replace 'dd/MM/yyyy' with the correct format string
-          parsedDueDate = DateFormat('dd/MM/yyyy').parse(rawDueDate);
-          // Other common formats you might encounter:
-          // parsedDueDate = DateFormat('yyyy-MM-dd').parse(rawDueDate);
-          // parsedDueDate = DateFormat('M/d/yyyy').parse(rawDueDate);
+          // Attempt 2: Standard ISO 8601 parsing (e.g., "2023-10-26T10:00:00Z" or "2023-10-26")
+          parsedDueDate = DateTime.parse(rawDueDate);
         } catch (e2) {
-          debugPrint('Error parsing due_date "$rawDueDate" with known formats: $e, $e2. Defaulting to now.');
-          parsedDueDate = DateTime.now(); // Fallback if all parsing fails
+          debugPrint('Failed to parse "$rawDueDate" with ISO 8601: $e2');
+          try {
+            // Attempt 3: "dd/MM/yyyy" (common alternative)
+            parsedDueDate = DateFormat('dd/MM/yyyy').parse(rawDueDate);
+          } catch (e3) {
+            debugPrint('Error parsing due_date "$rawDueDate" with all attempted formats (dd.MM.yyyy, ISO, dd/MM/yyyy): $e1, $e2, $e3. Defaulting to now.');
+            parsedDueDate = DateTime.now(); // Fallback if all parsing fails
+          }
         }
       }
     }
@@ -215,17 +216,33 @@ class _DataAnalyticsPageState extends State<DataAnalyticsPage> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
+
+          // Existing Line Chart
           Text(
-            'Users vs. Due Date',
+            'Users vs. Due Date (Filtered Range)',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.green[700]),
             textAlign: TextAlign.center,
           ),
           Container(
             height: 300,
             padding: const EdgeInsets.only(top: 16),
-            child: _buildLineChart(_filteredData),
+            child: _buildLineChart(_filteredData), // This uses _filteredData
           ),
           const SizedBox(height: 30),
+
+          // New DueDateLineChart for the next 10 days
+          Text(
+            'Upcoming Due Dates (Next 10 Days)',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.deepPurple[700]), // Different title color
+            textAlign: TextAlign.center,
+          ),
+          Container(
+            height: 300,
+            padding: const EdgeInsets.only(top: 16, bottom: 16), // Added bottom padding
+            child: DueDateLineChart(allDataPoints: _allData), // Pass _allData here
+          ),
+          const SizedBox(height: 30),
+          
           // Layout for Pie Charts (e.g., Row for wider screens, Column for narrower)
           LayoutBuilder(
             builder: (context, constraints) {
