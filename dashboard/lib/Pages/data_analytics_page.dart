@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart'; // For date formatting
-import 'due_date_line_chart.dart'; // Import the new chart widget
+import '../Utils/due_date_line_chart.dart'; // Import the new chart widget
 
 // Data model (similar to Customer model)
 class DataPoint {

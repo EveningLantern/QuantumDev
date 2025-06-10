@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:dashboard/admin_dashboard_page.dart';
-import 'package:dashboard/view_in_excel_page.dart';
-import 'package:dashboard/data_analytics_page.dart';
+import 'package:dashboard/Pages/admin_dashboard_page.dart';
+import 'package:dashboard/Pages/view_in_excel_page.dart';
+import 'package:dashboard/Pages/data_analytics_page.dart';
 
 void main() {
   runApp(const MainApp());

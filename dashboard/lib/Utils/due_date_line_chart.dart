@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import './data_analytics_page.dart'; // For DataPoint model
+import '../Pages/data_analytics_page.dart'; // For DataPoint model
 
 class DueDateLineChart extends StatelessWidget {
   final List<DataPoint> allDataPoints;
