@@ -210,6 +210,16 @@ class ThemeToggleButton extends StatelessWidget {
                   },
                   child: isDark
                       ? Icon(
+                          Icons.light_mode_rounded,
+                          key: const ValueKey('sun'),
+                          color: Colors.amber,
+                          size: 24,
+                        )
+                          .animate(onPlay: (controller) => controller.repeat())
+                          .shimmer(delay: 2.seconds, duration: 1.seconds)
+                          .animate()
+                          .rotate(duration: 4.seconds, curve: Curves.easeInOut)
+                      : Icon(
                           Icons.dark_mode_rounded,
                           key: const ValueKey('moon'),
                           color: Colors.indigo,
@@ -220,18 +230,7 @@ class ThemeToggleButton extends StatelessWidget {
                           .animate()
                           .rotate(duration: 1.seconds, begin: 0, end: 0.05)
                           .then()
-                          .rotate(duration: 1.seconds, begin: 0.05, end: 0)
-                      : Icon(
-                          Icons.light_mode_rounded,
-                          key: const ValueKey('sun'),
-                          color: Colors.amber,
-                          size: 24,
-                        )
-                          .animate(onPlay: (controller) => controller.repeat())
-                          .shimmer(delay: 2.seconds, duration: 1.seconds)
-                          .animate()
-                          .rotate(
-                              duration: 4.seconds, curve: Curves.easeInOut)),
+                          .rotate(duration: 1.seconds, begin: 0.05, end: 0)),
             ),
           ),
         ),

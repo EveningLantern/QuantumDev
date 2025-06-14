@@ -171,13 +171,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
     final hour = DateTime.now().hour;
     setState(() {
       if (hour < 12) {
-        _timeOfDay = 'Good Morning';
+        _timeOfDay = 'Good Morning,';
       } else if (hour < 17) {
-        _timeOfDay = 'Good Afternoon';
-      } else if (hour < 21) {
-        _timeOfDay = 'Good Evening';
+        _timeOfDay = 'Good Afternoon,';
       } else {
-        _timeOfDay = 'Good Night';
+        _timeOfDay = 'Good Evening,';
       }
     });
   }
@@ -812,7 +810,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
                   child: Row(
                     children: [
                       Text(
-                        'Good morning Sagar!',
+                        '$_timeOfDay Sagar!',
                         style: TextStyle(
                           fontSize: 48,
                           fontWeight: FontWeight.bold,
@@ -838,7 +836,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
                   child: AnimatedTextKit(
                     animatedTexts: [
                       TypewriterAnimatedText(
-                        'Welcome to your Quantum Dashboard',
+                        'Welcome to your Dashboard',
                         speed: const Duration(milliseconds: 80),
                       ),
                     ],
@@ -1155,7 +1153,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: Container(
-        height: 300,
+        height: 350,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,

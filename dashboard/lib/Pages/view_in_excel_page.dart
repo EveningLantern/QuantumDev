@@ -68,44 +68,63 @@ class Customer {
 class CellStyle {
   bool isBold;
   bool isUnderline;
+  bool isItalic;
+  bool isStrikethrough;
   Color? highlightColor;
+  Color? textColor;
   String fontFamily;
 
   CellStyle({
     this.isBold = false,
     this.isUnderline = false,
+    this.isItalic = false,
+    this.isStrikethrough = false,
     this.highlightColor,
+    this.textColor,
     this.fontFamily = 'Arial',
   });
 
   Map<String, dynamic> toJson() => {
         'isBold': isBold,
         'isUnderline': isUnderline,
+        'isItalic': isItalic,
+        'isStrikethrough': isStrikethrough,
         'highlightColor': highlightColor?.value, // Store color as int
+        'textColor': textColor?.value, // Store color as int
         'fontFamily': fontFamily,
       };
 
   factory CellStyle.fromJson(Map<String, dynamic> json) => CellStyle(
         isBold: json['isBold'] ?? false,
         isUnderline: json['isUnderline'] ?? false,
+        isItalic: json['isItalic'] ?? false,
+        isStrikethrough: json['isStrikethrough'] ?? false,
         highlightColor: json['highlightColor'] != null
             ? Color(json['highlightColor'])
             : null,
+        textColor: json['textColor'] != null ? Color(json['textColor']) : null,
         fontFamily: json['fontFamily'] ?? 'Arial',
       );
 
   CellStyle copyWith({
     bool? isBold,
     bool? isUnderline,
+    bool? isItalic,
+    bool? isStrikethrough,
     Color? highlightColor,
+    Color? textColor,
     String? fontFamily,
     bool clearHighlight = false,
+    bool clearTextColor = false,
   }) {
     return CellStyle(
       isBold: isBold ?? this.isBold,
       isUnderline: isUnderline ?? this.isUnderline,
+      isItalic: isItalic ?? this.isItalic,
+      isStrikethrough: isStrikethrough ?? this.isStrikethrough,
       highlightColor:
           clearHighlight ? null : (highlightColor ?? this.highlightColor),
+      textColor: clearTextColor ? null : (textColor ?? this.textColor),
       fontFamily: fontFamily ?? this.fontFamily,
     );
   }
@@ -186,8 +205,8 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   // --- Undo/Redo State Variables ---
   List<Map<String, dynamic>> _undoStack = [];
   List<Map<String, dynamic>> _redoStack = [];
-  static const int _maxUndoRedoStackSize =
-      50; // Limit stack size to prevent memory issues
+  static const int _maxUndoRedoStackSize = 10; // Limit to 10 history states
+  Map<String, dynamic>? _pendingState; // State before current edit
 
   // --- Column Resizing State Variables ---
   Map<String, double> _columnWidths = {
@@ -342,6 +361,108 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     }
   }
 
+  void _pickTextColor() async {
+    if (_selectedCellKey == null) return;
+    final currentStyle = _getCurrentCellStyle();
+    Color pickerColor = currentStyle.textColor ??
+        (Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : Colors.black);
+
+    Color? newColor = await showDialog<Color>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Pick a text color'),
+          content: SingleChildScrollView(
+            child: ColorPicker(
+              pickerColor: pickerColor,
+              onColorChanged: (color) => pickerColor = color,
+              enableAlpha: false,
+              pickerAreaHeightPercent: 0.8,
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Reset to Default'),
+              onPressed: () {
+                Navigator.of(context)
+                    .pop(Colors.transparent); // Represent default color
+              },
+            ),
+            TextButton(
+              child: const Text('Got it'),
+              onPressed: () {
+                Navigator.of(context).pop(pickerColor);
+              },
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newColor != null) {
+      _applyStyleChange(currentStyle.copyWith(
+        textColor: newColor == Colors.transparent ? null : newColor,
+        clearTextColor: newColor == Colors.transparent,
+      ));
+    }
+  }
+
+  // Helper method to build text decoration based on cell style
+  TextDecoration _buildTextDecoration(CellStyle style) {
+    List<TextDecoration> decorations = [];
+
+    if (style.isUnderline) {
+      decorations.add(TextDecoration.underline);
+    }
+
+    if (style.isStrikethrough) {
+      decorations.add(TextDecoration.lineThrough);
+    }
+
+    if (decorations.isEmpty) {
+      return TextDecoration.none;
+    } else if (decorations.length == 1) {
+      return decorations.first;
+    } else {
+      return TextDecoration.combine(decorations);
+    }
+  }
+
+  // Helper method to get effective text color
+  Color _getEffectiveTextColor(CellStyle style) {
+    if (style.textColor != null) {
+      return style.textColor!;
+    }
+    // Default color based on theme
+    return Theme.of(context).brightness == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+  }
+
+  // Helper method to get cell background color
+  Color? _getCellBackgroundColor(
+      CellStyle style, bool isSelected, bool isHovered) {
+    // If the cell has a custom highlight color, use it
+    if (style.highlightColor != null) {
+      return style.highlightColor;
+    }
+
+    // If the cell is selected, apply a default selection highlight
+    if (isSelected) {
+      return Theme.of(context).primaryColor.withOpacity(0.2);
+    }
+
+    // If the cell is hovered, apply a subtle hover effect
+    if (isHovered) {
+      return Theme.of(context).primaryColor.withOpacity(0.1);
+    }
+
+    // No background color
+    return null;
+  }
+
   // --- New Enhanced Feature Methods ---
 
   Future<void> _importExcel() async {
@@ -379,189 +500,60 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   }
 
   Future<void> _importFromCSV(File file) async {
-    // For tracking the current customer being processed
-    String currentCustomerName = '';
-    BuildContext? dialogContext;
-    StateSetter? dialogSetState;
-
     try {
       String contents = await file.readAsString();
       List<String> lines = contents.split('\n');
 
-      if (lines.isEmpty) return;
-
-      // Show progress dialog with live updates
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          dialogContext = context;
-          return StatefulBuilder(
-            builder: (context, setStateFunction) {
-              dialogSetState = setStateFunction;
-              return AlertDialog(
-                title: const Text('Importing Data'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    Text('Currently processing: $currentCustomerName'),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      );
-
-      // Skip the first line (header) and start from the second line
-      List<Customer> importedCustomers = [];
-      int successCount = 0;
-
-      // Process each line starting from the second line (index 1)
-      for (int i = 1; i < lines.length; i++) {
-        if (lines[i].trim().isEmpty) continue;
-
-        // Split by comma - expecting 4 values
-        List<String> values = lines[i].split(',');
-
-        // Check if we have at least 4 values
-        if (values.length < 4) {
-          // Skip malformed rows
-          continue;
-        }
-
-        // Generate a unique ID
-        String id = DateTime.now().millisecondsSinceEpoch.toString() +
-            '_' +
-            i.toString();
-
-        // Map values according to specified order:
-        // 1st value -> name
-        // 2nd value -> dueDate
-        // 3rd value -> vehicleNumber
-        // 4th value -> contactNumber
-        // 5th value -> model (if available)
-        // 6th value -> insurer (if available)
-
-        String name = values[0].trim();
-
-        // Update the dialog to show current record being processed
-        if (dialogSetState != null) {
-          // Use the stored StatefulBuilder's setState function
-          dialogSetState!(() {
-            currentCustomerName = name;
-          });
-        }
-
-        // Check if any required value is missing or empty
-        if (name.isEmpty) {
-          // Close progress dialog
-          if (dialogContext != null) {
-            Navigator.of(dialogContext!).pop();
-          }
-
-          // Show error message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Import stopped: Missing name in row ${i + 1}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 4),
+      if (lines.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.warning, color: Colors.white),
+                SizedBox(width: 10),
+                Text('CSV file is empty'),
+              ],
             ),
-          );
-
-          // Stop processing if any required value is missing
-          return;
-        }
-
-        // Create customer with the values in the specified order
-        Customer customer = Customer(
-          id: id,
-          name: name,
-          dueDate: values.length > 1 ? values[1].trim() : '',
-          vehicleNumber: values.length > 2 ? values[2].trim() : '',
-          contactNumber: values.length > 3 ? values[3].trim() : '',
-          model: values.length > 4 ? values[4].trim() : '',
-          insurer: values.length > 5 ? values[5].trim() : '',
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
         );
-
-        // Add to server immediately
-        try {
-          await _addCustomerToServerSilent(customer);
-          successCount++;
-          importedCustomers.add(customer);
-        } catch (e) {
-          // Close progress dialog
-          if (dialogContext != null) {
-            Navigator.of(dialogContext!).pop();
-          }
-
-          // Show error message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  'Import stopped at row ${i + 1}: Failed to add customer "$name"'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-
-          // Stop processing on first error
-          return;
-        }
+        return;
       }
 
-      // Close progress dialog
-      if (dialogContext != null) {
-        Navigator.of(dialogContext!).pop();
-      }
-
-      // Refresh data
-      _fetchDataFromServer();
-
-      // Show success message
+      // Show initial progress SnackBar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.check_circle, color: Colors.white),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Import Successful',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    Text(
-                      'Successfully imported $successCount customers',
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                  ],
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               ),
+              const SizedBox(width: 15),
+              Text('Starting import of ${lines.length - 1} records...'),
             ],
           ),
-          backgroundColor: Theme.of(context).primaryColor,
-          duration: const Duration(seconds: 4),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
         ),
       );
-    } catch (e) {
-      // Close progress dialog if it's open
-      if (dialogContext != null && Navigator.of(dialogContext!).canPop()) {
-        Navigator.of(dialogContext!).pop();
-      }
 
+      // Process import in background without blocking UI
+      _processCSVImportInBackground(lines);
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -581,7 +573,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                       ),
                     ),
                     Text(
-                      'Error parsing CSV: $e',
+                      'Error reading CSV file: $e',
                       style: const TextStyle(fontSize: 14),
                     ),
                   ],
@@ -590,7 +582,221 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
             ],
           ),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _processCSVImportInBackground(List<String> lines) async {
+    int successCount = 0;
+    int totalRecords = lines.length - 1; // Exclude header
+    int processedCount = 0;
+    List<String> errors = [];
+
+    try {
+      // Process each line starting from the second line (index 1)
+      for (int i = 1; i < lines.length; i++) {
+        if (lines[i].trim().isEmpty) continue;
+
+        processedCount++;
+
+        try {
+          // Split by comma - expecting at least 4 values
+          List<String> values = lines[i].split(',');
+
+          // Check if we have at least 4 values
+          if (values.length < 4) {
+            errors.add(
+                'Row ${i + 1}: Insufficient data (need at least 4 columns)');
+            continue;
+          }
+
+          // Generate a unique ID
+          String id = DateTime.now().millisecondsSinceEpoch.toString() +
+              '_' +
+              i.toString();
+
+          String name = values[0].trim();
+
+          // Check if name is missing
+          if (name.isEmpty) {
+            errors.add('Row ${i + 1}: Missing customer name');
+            continue;
+          }
+
+          // Create customer with the values in the specified order
+          Customer customer = Customer(
+            id: id,
+            name: name,
+            dueDate: values.length > 1 ? values[1].trim() : '',
+            vehicleNumber: values.length > 2 ? values[2].trim() : '',
+            contactNumber: values.length > 3 ? values[3].trim() : '',
+            model: values.length > 4 ? values[4].trim() : '',
+            insurer: values.length > 5 ? values[5].trim() : '',
+          );
+
+          // Add to server
+          await _addCustomerToServerSilent(customer);
+          successCount++;
+
+          // Show progress updates every 10 records or at milestones
+          if (processedCount % 10 == 0 || processedCount == totalRecords) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text('Processing: $processedCount/$totalRecords records'),
+                  ],
+                ),
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                duration: const Duration(milliseconds: 800),
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            );
+          }
+        } catch (e) {
+          errors.add('Row ${i + 1}: Failed to process - $e');
+          continue; // Continue with next record instead of stopping
+        }
+
+        // Add small delay to prevent overwhelming the server
+        if (i % 5 == 0) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+      }
+
+      // Refresh data after import
+      await _fetchDataFromServer();
+
+      // Show final result
+      _showImportResult(successCount, totalRecords, errors);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Import process failed: $e'),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _showImportResult(
+      int successCount, int totalRecords, List<String> errors) {
+    if (errors.isEmpty) {
+      // Complete success
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Import Completed Successfully!',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      'Successfully imported all $successCount customers',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.green,
           duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+    } else {
+      // Partial success or complete failure
+      Color backgroundColor = successCount > 0 ? Colors.orange : Colors.red;
+      IconData icon = successCount > 0 ? Icons.warning : Icons.error;
+      String title =
+          successCount > 0 ? 'Import Partially Completed' : 'Import Failed';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(icon, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      'Success: $successCount/$totalRecords, Errors: ${errors.length}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    if (errors.length <= 3)
+                      ...errors.take(3).map((error) => Text(
+                            error,
+                            style: const TextStyle(fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )),
+                    if (errors.length > 3)
+                      Text(
+                        'First 3 errors shown. ${errors.length - 3} more errors occurred.',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: backgroundColor,
+          duration: const Duration(seconds: 6),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -667,41 +873,17 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     });
   }
 
-  void _changeFontSize(double fontSize) {
-    if (_selectedCellKey == null) return;
-
-    // Note: CellStyle doesn't currently support fontSize, but we can extend it later
-    // For now, we'll just acknowledge the change
-    setState(() {
-      // You might want to add fontSize to CellStyle class and handle it here
-    });
-  }
-
   void _toggleItalic() {
     if (_selectedCellKey == null) return;
-    // Note: CellStyle doesn't currently support italic, but we can extend it later
-    // For now, we'll just acknowledge the change
-    setState(() {
-      // You might want to add isItalic to CellStyle class and handle it here
-    });
+    final currentStyle = _getCurrentCellStyle();
+    _applyStyleChange(currentStyle.copyWith(isItalic: !currentStyle.isItalic));
   }
 
   void _toggleStrikethrough() {
     if (_selectedCellKey == null) return;
-    // Note: CellStyle doesn't currently support strikethrough, but we can extend it later
-    // For now, we'll just acknowledge the change
-    setState(() {
-      // You might want to add isStrikethrough to CellStyle class and handle it here
-    });
-  }
-
-  void _pickTextColor() {
-    if (_selectedCellKey == null) return;
-    // Note: CellStyle doesn't currently support text color, but we can extend it later
-    // For now, we'll just acknowledge the change
-    setState(() {
-      // You might want to add textColor to CellStyle class and handle it here
-    });
+    final currentStyle = _getCurrentCellStyle();
+    _applyStyleChange(
+        currentStyle.copyWith(isStrikethrough: !currentStyle.isStrikethrough));
   }
 
   // Method to handle record deletion
@@ -1820,12 +2002,60 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   }
 
   // --- Undo/Redo Methods ---
+  void _saveStateBeforeEdit(String customerId, String columnKey) {
+    // Save the current state before starting an edit
+    final customerIndex = _customers.indexWhere((c) => c.id == customerId);
+    if (customerIndex == -1) return;
+
+    final customer = _customers[customerIndex];
+    _pendingState = {
+      'customerId': customerId,
+      'columnKey': columnKey,
+      'customer': Customer(
+        id: customer.id,
+        name: customer.name,
+        dueDate: customer.dueDate,
+        vehicleNumber: customer.vehicleNumber,
+        contactNumber: customer.contactNumber,
+        model: customer.model,
+        insurer: customer.insurer,
+      ),
+      'cellStyles': Map<String, CellStyle>.from(_cellStyles),
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+  }
+
+  void _saveStateAfterBackendUpdate() {
+    // Only save to history after successful backend update
+    if (_pendingState == null) return;
+
+    // Add the pending state to undo stack
+    _undoStack.add(_pendingState!);
+
+    // Clear redo stack when a new action is performed
+    _redoStack.clear();
+
+    // Limit stack size to 10
+    if (_undoStack.length > _maxUndoRedoStackSize) {
+      _undoStack.removeAt(0);
+    }
+
+    // Clear pending state
+    _pendingState = null;
+  }
+
+  void _clearPendingState() {
+    // Clear pending state if edit was cancelled or failed
+    _pendingState = null;
+  }
+
   void _saveStateForUndo() {
-    // Create a snapshot of the current state
+    // Save the current state for undo operations (for styling and cell value changes)
     final currentState = {
+      'customers': List<Customer>.from(_customers),
       'cellStyles': Map<String, CellStyle>.from(_cellStyles),
       'cellValues': Map<String, String>.from(_cellValues),
-      'selectedCellKey': _selectedCellKey,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
     // Add to undo stack
@@ -1834,88 +2064,206 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     // Clear redo stack when a new action is performed
     _redoStack.clear();
 
-    // Limit stack size
+    // Limit stack size to prevent memory issues
     if (_undoStack.length > _maxUndoRedoStackSize) {
       _undoStack.removeAt(0);
     }
   }
 
-  void _undo() {
+  Future<void> _undo() async {
     if (_undoStack.isEmpty) {
-      // Show message that there's nothing to undo
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Nothing to undo'),
           backgroundColor: Colors.orange,
-          duration: Duration(seconds: 1),
+          duration: Duration(seconds: 2),
         ),
       );
       return;
     }
 
-    // Save current state to redo stack
-    final currentState = {
-      'cellStyles': Map<String, CellStyle>.from(_cellStyles),
-      'cellValues': Map<String, String>.from(_cellValues),
-      'selectedCellKey': _selectedCellKey,
-    };
-    _redoStack.add(currentState);
-
-    // Restore previous state
-    final previousState = _undoStack.removeLast();
-    setState(() {
-      _cellStyles = previousState['cellStyles'] as Map<String, CellStyle>;
-      _cellValues = previousState['cellValues'] as Map<String, String>;
-      _selectedCellKey = previousState['selectedCellKey'] as String?;
-    });
-
-    // Show undo message
+    // Show loading indicator
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Undo successful'),
-        backgroundColor: Theme.of(context).colorScheme.secondary,
-        duration: Duration(seconds: 1),
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text('Undoing changes...'),
+          ],
+        ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        duration: const Duration(seconds: 1),
       ),
     );
+
+    try {
+      // Save current state to redo stack before undoing
+      final currentCustomers = List<Customer>.from(_customers);
+      final currentCellStyles = Map<String, CellStyle>.from(_cellStyles);
+
+      _redoStack.add({
+        'customers': currentCustomers,
+        'cellStyles': currentCellStyles,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // Get the previous state
+      final previousState = _undoStack.removeLast();
+      final previousCustomer = previousState['customer'] as Customer;
+      final previousCellStyles =
+          previousState['cellStyles'] as Map<String, CellStyle>;
+
+      // Update the customer in the backend
+      await _updateCustomerInServer(previousCustomer);
+
+      // Update local state
+      final customerIndex =
+          _customers.indexWhere((c) => c.id == previousCustomer.id);
+      if (customerIndex != -1) {
+        setState(() {
+          _customers[customerIndex] = previousCustomer;
+          _cellStyles = previousCellStyles;
+        });
+        _applySearchAndFilters();
+      }
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.undo, color: Colors.white),
+              const SizedBox(width: 10),
+              const Text('Undo successful'),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      // Restore the state if backend update failed
+      if (_redoStack.isNotEmpty) {
+        _redoStack.removeLast(); // Remove the state we just added
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Undo failed: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
-  void _redo() {
+  Future<void> _redo() async {
     if (_redoStack.isEmpty) {
-      // Show message that there's nothing to redo
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Nothing to redo'),
           backgroundColor: Colors.orange,
-          duration: Duration(seconds: 1),
+          duration: Duration(seconds: 2),
         ),
       );
       return;
     }
 
-    // Save current state to undo stack
-    final currentState = {
-      'cellStyles': Map<String, CellStyle>.from(_cellStyles),
-      'cellValues': Map<String, String>.from(_cellValues),
-      'selectedCellKey': _selectedCellKey,
-    };
-    _undoStack.add(currentState);
-
-    // Restore next state
-    final nextState = _redoStack.removeLast();
-    setState(() {
-      _cellStyles = nextState['cellStyles'] as Map<String, CellStyle>;
-      _cellValues = nextState['cellValues'] as Map<String, String>;
-      _selectedCellKey = nextState['selectedCellKey'] as String?;
-    });
-
-    // Show redo message
+    // Show loading indicator
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Redo successful'),
-        backgroundColor: Theme.of(context).colorScheme.secondary,
-        duration: Duration(seconds: 1),
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text('Redoing changes...'),
+          ],
+        ),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        duration: const Duration(seconds: 1),
       ),
     );
+
+    try {
+      // Save current state to undo stack before redoing
+      final currentCustomers = List<Customer>.from(_customers);
+      final currentCellStyles = Map<String, CellStyle>.from(_cellStyles);
+
+      // Create a state snapshot for undo
+      final currentState = {
+        'customers': currentCustomers,
+        'cellStyles': currentCellStyles,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      // Get the next state
+      final nextState = _redoStack.removeLast();
+      final nextCustomers = nextState['customers'] as List<Customer>;
+      final nextCellStyles = nextState['cellStyles'] as Map<String, CellStyle>;
+
+      // Update all changed customers in the backend
+      for (int i = 0; i < nextCustomers.length && i < _customers.length; i++) {
+        if (nextCustomers[i].id == _customers[i].id) {
+          // Check if customer data is different
+          if (nextCustomers[i].name != _customers[i].name ||
+              nextCustomers[i].dueDate != _customers[i].dueDate ||
+              nextCustomers[i].vehicleNumber != _customers[i].vehicleNumber ||
+              nextCustomers[i].contactNumber != _customers[i].contactNumber ||
+              nextCustomers[i].model != _customers[i].model ||
+              nextCustomers[i].insurer != _customers[i].insurer) {
+            await _updateCustomerInServer(nextCustomers[i]);
+          }
+        }
+      }
+
+      // Add current state to undo stack after successful backend update
+      _undoStack.add(currentState);
+
+      // Update local state
+      setState(() {
+        _customers = nextCustomers;
+        _cellStyles = nextCellStyles;
+      });
+      _applySearchAndFilters();
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.redo, color: Colors.white),
+              const SizedBox(width: 10),
+              const Text('Redo successful'),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Redo failed: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   // The _showRangeDialog function has been replaced with direct implementations
@@ -2220,6 +2568,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                 : Matrix4.identity(),
             transformAlignment: Alignment.center,
             decoration: BoxDecoration(
+              color: _getCellBackgroundColor(style, isSelected, isHovered),
               border: isSelected
                   ? Border.all(
                       color: Theme.of(context).primaryColorDark, width: 2)
@@ -2236,12 +2585,10 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                       fontFamily: style.fontFamily,
                       fontWeight:
                           style.isBold ? FontWeight.bold : FontWeight.normal,
-                      decoration: style.isUnderline
-                          ? TextDecoration.underline
-                          : TextDecoration.none,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white // Glowing white in dark mode
-                          : Colors.black, // Black in light mode
+                      fontStyle:
+                          style.isItalic ? FontStyle.italic : FontStyle.normal,
+                      decoration: _buildTextDecoration(style),
+                      color: _getEffectiveTextColor(style),
                     ),
                     decoration: InputDecoration(
                       border: InputBorder.none,
@@ -2257,13 +2604,10 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                       fontFamily: style.fontFamily,
                       fontWeight:
                           style.isBold ? FontWeight.bold : FontWeight.normal,
-                      decoration: style.isUnderline
-                          ? TextDecoration.underline
-                          : TextDecoration.none,
-                      backgroundColor: style.highlightColor,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white // Glowing white in dark mode
-                          : Colors.black, // Black in light mode
+                      fontStyle:
+                          style.isItalic ? FontStyle.italic : FontStyle.normal,
+                      decoration: _buildTextDecoration(style),
+                      color: _getEffectiveTextColor(style),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2802,6 +3146,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
     final customer = _customers[customerIndex];
 
+    // Save state before making changes (for undo functionality)
+    _saveStateBeforeEdit(customerId, columnKey);
+
     // Create a customer object with only the specific field being updated
     // This ensures we're only sending the relevant field in the update request
     Customer updatedCustomer = Customer(
@@ -2899,6 +3246,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
       });
 
       _applySearchAndFilters();
+
+      // Save state to undo history after successful backend update
+      _saveStateAfterBackendUpdate();
 
       // Show success message with details about the updated field
       String fieldName = '';
@@ -3017,6 +3367,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
           ),
         ),
       );
+
+      // Clear pending state since the update failed
+      _clearPendingState();
     }
   }
 
@@ -3323,18 +3676,17 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
               child: FormattingToolbar(
                 isBoldActive: currentStyle.isBold,
                 isUnderlineActive: currentStyle.isUnderline,
-                isItalicActive: false, // Add support later
-                isStrikethroughActive: false, // Add support later
+                isItalicActive: currentStyle.isItalic,
+                isStrikethroughActive: currentStyle.isStrikethrough,
                 onToggleBold: _toggleBold,
                 onToggleUnderline: _toggleUnderline,
                 onToggleItalic: _toggleItalic,
                 onToggleStrikethrough: _toggleStrikethrough,
-                onPickHighlightColor: _pickHighlightColor,
+
                 onPickTextColor: _pickTextColor,
                 onImportExcel: _importExcel,
                 onExportExcel: _exportExcel,
                 onChangeFontStyle: _changeFontStyle,
-                onChangeFontSize: _changeFontSize,
                 onInsertToday: _insertToday,
                 onInsertEdate: _insertEdate,
                 onInsertNetworkdays: _insertNetworkdays,
@@ -3344,8 +3696,6 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                     _deleteRecord, // Add delete record functionality
                 onInsertCountIf: _insertCountIf, // Add Count If functionality
                 currentFontFamily: _currentFontFamily,
-                currentFontSize:
-                    12.0, // Add support for dynamic font size later
                 isEnabled: _selectedCellKey != null,
                 onInsertSigmoid: _insertSigmoid,
                 onInsertIntegration: _insertIntegration,

@@ -42,6 +42,12 @@ class DueDateLineChart extends StatelessWidget {
     final Color lineColor = theme.colorScheme.primary;
     final Color gradientColor = theme.colorScheme.primary.withOpacity(0.2);
     final Color dotColor = theme.colorScheme.secondary;
+    final Color backgroundColor = theme.colorScheme.surface;
+    final Color textColor =
+        theme.textTheme.bodyMedium?.color ?? theme.colorScheme.onSurface;
+    final Color subtitleColor = theme.colorScheme.onSurface.withOpacity(0.6);
+    final Color gridColor = theme.colorScheme.onSurface.withOpacity(0.1);
+    final Color borderColor = theme.colorScheme.onSurface.withOpacity(0.2);
 
     // Find the maximum count for scaling
     final int maxCount =
@@ -75,11 +81,11 @@ class DueDateLineChart extends StatelessWidget {
       height: 350, // Increased height for better visibility
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: theme.shadowColor.withOpacity(0.1),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -96,11 +102,11 @@ class DueDateLineChart extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.grey[800],
+                  color: textColor,
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.date_range, color: Colors.blue),
+                icon: Icon(Icons.date_range, color: theme.colorScheme.primary),
                 tooltip: 'Select Date Range',
                 onPressed: onDateRangePressed,
               ),
@@ -111,7 +117,7 @@ class DueDateLineChart extends StatelessWidget {
             'Range: ${DateFormat('dd MMM, yyyy').format(startDate)} - ${DateFormat('dd MMM, yyyy').format(endDate)}',
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey[600],
+              color: subtitleColor,
             ),
           ),
           // Legend for the chart
@@ -133,7 +139,7 @@ class DueDateLineChart extends StatelessWidget {
                   'Cumulative renewals',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey[700],
+                    color: subtitleColor,
                   ),
                 ),
               ],
@@ -145,6 +151,7 @@ class DueDateLineChart extends StatelessWidget {
               LineChartData(
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (touchedSpot) => theme.colorScheme.primary,
                     getTooltipItems: (List<LineBarSpot> touchedSpots) {
                       return touchedSpots.map((spot) {
                         final int index = spot.x.toInt();
@@ -158,7 +165,7 @@ class DueDateLineChart extends StatelessWidget {
                         return LineTooltipItem(
                           '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} total',
                           TextStyle(
-                            color: Colors.white,
+                            color: theme.colorScheme.onPrimary,
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
                           ),
@@ -178,7 +185,7 @@ class DueDateLineChart extends StatelessWidget {
                   horizontalInterval: maxCount > 10 ? maxCount / 5 : 1,
                   getDrawingHorizontalLine: (value) {
                     return FlLine(
-                      color: Colors.grey[200],
+                      color: gridColor,
                       strokeWidth: 1,
                       dashArray: [5, 5], // Dotted lines
                     );
@@ -208,7 +215,7 @@ class DueDateLineChart extends StatelessWidget {
                               Text(
                                 DateFormat('MMM d').format(date),
                                 style: TextStyle(
-                                  color: Colors.grey[700],
+                                  color: subtitleColor,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -218,7 +225,7 @@ class DueDateLineChart extends StatelessWidget {
                                 DateFormat('E').format(
                                     date), // Day of week (e.g., Mon, Tue)
                                 style: TextStyle(
-                                  color: Colors.grey[500],
+                                  color: subtitleColor.withOpacity(0.8),
                                   fontSize: 9,
                                   fontWeight: FontWeight.w400,
                                 ),
@@ -233,7 +240,7 @@ class DueDateLineChart extends StatelessWidget {
                     axisNameWidget: Text(
                       'Cumulative Customers',
                       style: TextStyle(
-                        color: Colors.grey[700],
+                        color: subtitleColor,
                         fontSize: 12,
                       ),
                     ),
@@ -250,7 +257,7 @@ class DueDateLineChart extends StatelessWidget {
                             child: Text(
                               value.toInt().toString(),
                               style: TextStyle(
-                                color: Colors.grey[700],
+                                color: subtitleColor,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -271,8 +278,8 @@ class DueDateLineChart extends StatelessWidget {
                 borderData: FlBorderData(
                   show: true,
                   border: Border(
-                    bottom: BorderSide(color: Colors.grey[300]!, width: 1),
-                    left: BorderSide(color: Colors.grey[300]!, width: 1),
+                    bottom: BorderSide(color: borderColor, width: 1),
+                    left: BorderSide(color: borderColor, width: 1),
                   ),
                 ),
                 minX: 0,
@@ -302,7 +309,7 @@ class DueDateLineChart extends StatelessWidget {
                           radius: 4,
                           color: dotColor,
                           strokeWidth: 2,
-                          strokeColor: Colors.white,
+                          strokeColor: backgroundColor,
                         );
                       },
                       checkToShowDot: (spot, barData) {

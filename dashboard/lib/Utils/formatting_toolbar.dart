@@ -9,7 +9,6 @@ class FormattingToolbar extends StatelessWidget {
   final VoidCallback onToggleUnderline;
   final VoidCallback onToggleItalic;
   final VoidCallback onToggleStrikethrough;
-  final VoidCallback onPickHighlightColor;
   final VoidCallback onPickTextColor; // New callback for text color
   final bool isEnabled; // New parameter to control if toolbar is enabled
 
@@ -28,8 +27,6 @@ class FormattingToolbar extends StatelessWidget {
   final VoidCallback onUndo; // New callback for undo
   final VoidCallback onRedo; // New callback for redo
   final String currentFontFamily;
-  final double currentFontSize;
-  final Function(double) onChangeFontSize;
   final VoidCallback onDeleteRecord; // New callback for record deletion
   final VoidCallback onInsertCountIf; // New callback for Count If function
 
@@ -43,7 +40,6 @@ class FormattingToolbar extends StatelessWidget {
     required this.onToggleUnderline,
     required this.onToggleItalic,
     required this.onToggleStrikethrough,
-    required this.onPickHighlightColor,
     required this.onPickTextColor,
     required this.onImportExcel,
     required this.onExportExcel,
@@ -57,11 +53,9 @@ class FormattingToolbar extends StatelessWidget {
     required this.onInsertIntegration, // Required parameter for integration
     required this.onUndo, // Required parameter for undo
     required this.onRedo, // Required parameter for redo
-    required this.onChangeFontSize,
     required this.onDeleteRecord, // Required parameter for delete functionality
     required this.onInsertCountIf, // Required parameter for Count If function
     this.currentFontFamily = 'Arial',
-    this.currentFontSize = 12.0,
     this.isEnabled = true, // Default to enabled
   });
 
@@ -87,26 +81,6 @@ class FormattingToolbar extends StatelessWidget {
     'Times New Roman',
     'Trebuchet MS',
     'Verdana',
-  ];
-
-  // Common font sizes like in Excel/Word
-  static const List<double> _fontSizes = [
-    8,
-    9,
-    10,
-    11,
-    12,
-    14,
-    16,
-    18,
-    20,
-    22,
-    24,
-    26,
-    28,
-    36,
-    48,
-    72
   ];
 
   @override
@@ -226,44 +200,6 @@ class FormattingToolbar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[400]!),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: PopupMenuButton<double>(
-                    icon: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8.0, vertical: 4.0),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.format_size,
-                              color: Colors.black87, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            '${currentFontSize.toInt()}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          const Icon(Icons.arrow_drop_down, size: 16),
-                        ],
-                      ),
-                    ),
-                    tooltip: 'Font Size',
-                    onSelected: (double value) => onChangeFontSize(value),
-                    itemBuilder: (BuildContext context) => _fontSizes
-                        .map((size) => PopupMenuItem<double>(
-                              value: size,
-                              child: Text(
-                                '${size.toInt()}',
-                                style:
-                                    TextStyle(fontSize: size > 18 ? 14 : size),
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ),
-                const SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.format_bold),
                   tooltip: 'Bold',
@@ -317,28 +253,6 @@ class FormattingToolbar extends StatelessWidget {
                   tooltip: 'Text Color',
                   color: Colors.black87,
                   onPressed: onPickTextColor,
-                ),
-                IconButton(
-                  icon: Stack(
-                    children: [
-                      const Icon(Icons.format_color_fill),
-                      Positioned(
-                        bottom: 2,
-                        left: 2,
-                        right: 2,
-                        child: Container(
-                          height: 3,
-                          decoration: BoxDecoration(
-                            color: Colors.yellow,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  tooltip: 'Highlight Color',
-                  color: Colors.black87,
-                  onPressed: onPickHighlightColor,
                 ),
               ]),
 
@@ -412,12 +326,6 @@ class FormattingToolbar extends StatelessWidget {
                       case 'MAX':
                         onInsertMax();
                         break;
-                      case 'SIGMOID':
-                        onInsertSigmoid();
-                        break;
-                      case 'INTEGRATE':
-                        onInsertIntegration();
-                        break;
                     }
                   },
                   itemBuilder: (BuildContext context) => [
@@ -438,26 +346,6 @@ class FormattingToolbar extends StatelessWidget {
                           Icon(Icons.trending_up, size: 16),
                           SizedBox(width: 8),
                           Text('MAX()'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'SIGMOID',
-                      child: Row(
-                        children: [
-                          Icon(Icons.show_chart, size: 16),
-                          SizedBox(width: 8),
-                          Text('SIGMOID()'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'INTEGRATE',
-                      child: Row(
-                        children: [
-                          Icon(Icons.area_chart, size: 16),
-                          SizedBox(width: 8),
-                          Text('INTEGRATE()'),
                         ],
                       ),
                     ),
