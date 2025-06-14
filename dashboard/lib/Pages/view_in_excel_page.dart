@@ -3682,7 +3682,6 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                 onToggleUnderline: _toggleUnderline,
                 onToggleItalic: _toggleItalic,
                 onToggleStrikethrough: _toggleStrikethrough,
-
                 onPickTextColor: _pickTextColor,
                 onImportExcel: _importExcel,
                 onExportExcel: _exportExcel,
@@ -4026,15 +4025,12 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
             // Add Customer FAB
             onPressed: () =>
                 _animateFab(_showAddCustomerDialog), // Simplified call
-            backgroundColor: Colors.green[700],
-            foregroundColor: Colors.white,
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
             elevation: 6.0,
             heroTag: 'addCustomerFab', // Unique heroTag
             tooltip: 'Add New Customer',
-            child: AnimatedIcon(
-              icon: AnimatedIcons.menu_close, // Default icon, can be changed
-              progress: _fabAnimationController,
-            ),
+            child: const Icon(Icons.add),
           ),
         ],
       ),
