@@ -141,204 +141,195 @@ class DueDateLineChart extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: cumulativeData.isEmpty
-                ? Center(
-                    child: Text(
-                      'No renewal data available in selected date range',
-                      style: TextStyle(color: Colors.grey[500]),
-                    ),
-                  )
-                : LineChart(
-                    LineChartData(
-                      lineTouchData: LineTouchData(
-                        touchTooltipData: LineTouchTooltipData(
-                          getTooltipItems: (List<LineBarSpot> touchedSpots) {
-                            return touchedSpots.map((spot) {
-                              final int index = spot.x.toInt();
-                              if (index < 0 || index >= cumulativeData.length) {
-                                return null;
-                              }
+            child: LineChart(
+              LineChartData(
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (List<LineBarSpot> touchedSpots) {
+                      return touchedSpots.map((spot) {
+                        final int index = spot.x.toInt();
+                        if (index < 0 || index >= cumulativeData.length) {
+                          return null;
+                        }
 
-                              final date = cumulativeData[index].date;
-                              final count = cumulativeData[index].count;
+                        final date = cumulativeData[index].date;
+                        final count = cumulativeData[index].count;
 
-                              return LineTooltipItem(
-                                '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} total',
-                                TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
+                        return LineTooltipItem(
+                          '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} total',
+                          TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        );
+                      }).toList();
+                    },
+                    tooltipMargin: 8,
+                    fitInsideHorizontally: true,
+                    fitInsideVertically: true,
+                  ),
+                  handleBuiltInTouches: true,
+                  touchSpotThreshold: 20,
+                ),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: maxCount > 10 ? maxCount / 5 : 1,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: Colors.grey[200],
+                      strokeWidth: 1,
+                      dashArray: [5, 5], // Dotted lines
+                    );
+                  },
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 50, // More space for two-line labels
+                      interval: cumulativeData.length > 10
+                          ? (cumulativeData.length / 5).ceil().toDouble()
+                          : 1,
+                      getTitlesWidget: (value, meta) {
+                        final int index = value.toInt();
+                        if (index < 0 || index >= cumulativeData.length) {
+                          return const SizedBox();
+                        }
+
+                        final date = cumulativeData[index].date;
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                DateFormat('MMM d').format(date),
+                                style: TextStyle(
+                                  color: Colors.grey[700],
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                              );
-                            }).toList();
-                          },
-                          tooltipMargin: 8,
-                          fitInsideHorizontally: true,
-                          fitInsideVertically: true,
-                        ),
-                        handleBuiltInTouches: true,
-                        touchSpotThreshold: 20,
-                      ),
-                      gridData: FlGridData(
-                        show: true,
-                        drawVerticalLine: false,
-                        horizontalInterval: maxCount > 10 ? maxCount / 5 : 1,
-                        getDrawingHorizontalLine: (value) {
-                          return FlLine(
-                            color: Colors.grey[200],
-                            strokeWidth: 1,
-                            dashArray: [5, 5], // Dotted lines
-                          );
-                        },
-                      ),
-                      titlesData: FlTitlesData(
-                        show: true,
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            reservedSize: 50, // More space for two-line labels
-                            interval: cumulativeData.length > 10
-                                ? (cumulativeData.length / 5).ceil().toDouble()
-                                : 1,
-                            getTitlesWidget: (value, meta) {
-                              final int index = value.toInt();
-                              if (index < 0 || index >= cumulativeData.length) {
-                                return const SizedBox();
-                              }
-
-                              final date = cumulativeData[index].date;
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      DateFormat('MMM d').format(date),
-                                      style: TextStyle(
-                                        color: Colors.grey[700],
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    // Add day of week for better context
-                                    Text(
-                                      DateFormat('E').format(
-                                          date), // Day of week (e.g., Mon, Tue)
-                                      style: TextStyle(
-                                        color: Colors.grey[500],
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w400,
-                                      ),
-                                    ),
-                                  ],
+                              ),
+                              // Add day of week for better context
+                              Text(
+                                DateFormat('E').format(
+                                    date), // Day of week (e.g., Mon, Tue)
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w400,
                                 ),
-                              );
-                            },
+                              ),
+                            ],
                           ),
-                        ),
-                        leftTitles: AxisTitles(
-                          axisNameWidget: Text(
-                            'Cumulative Customers',
-                            style: TextStyle(
-                              color: Colors.grey[700],
-                              fontSize: 12,
-                            ),
-                          ),
-                          axisNameSize: 25,
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            reservedSize: 40,
-                            interval: maxCount > 10 ? maxCount / 5 : 1,
-                            getTitlesWidget: (value, meta) {
-                              if (value == 0) return const SizedBox();
-                              if (value % 1 == 0 || maxCount > 20) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 4),
-                                  child: Text(
-                                    value.toInt().toString(),
-                                    style: TextStyle(
-                                      color: Colors.grey[700],
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                );
-                              }
-                              return const SizedBox();
-                            },
-                          ),
-                        ),
-                        topTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        rightTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                      ),
-                      borderData: FlBorderData(
-                        show: true,
-                        border: Border(
-                          bottom:
-                              BorderSide(color: Colors.grey[300]!, width: 1),
-                          left: BorderSide(color: Colors.grey[300]!, width: 1),
-                        ),
-                      ),
-                      minX: 0,
-                      maxX: (cumulativeData.length - 1).toDouble(),
-                      minY: 0,
-                      maxY: cumulativeData.isEmpty
-                          ? 10
-                          : (cumulativeData.last.count * 1.2)
-                              .toDouble(), // Add some space at the top
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: List.generate(cumulativeData.length, (index) {
-                            return FlSpot(
-                              index.toDouble(),
-                              cumulativeData[index].count.toDouble(),
-                            );
-                          }),
-                          isCurved: true,
-                          curveSmoothness: 0.3,
-                          color: lineColor,
-                          barWidth: 3,
-                          isStrokeCapRound: true,
-                          dotData: FlDotData(
-                            show: true,
-                            getDotPainter: (spot, percent, barData, index) {
-                              return FlDotCirclePainter(
-                                radius: 4,
-                                color: dotColor,
-                                strokeWidth: 2,
-                                strokeColor: Colors.white,
-                              );
-                            },
-                            checkToShowDot: (spot, barData) {
-                              // Show dots at regular intervals or for important points
-                              return cumulativeData.length <= 10 ||
-                                  spot.x.toInt() %
-                                          ((cumulativeData.length / 5)
-                                              .ceil()) ==
-                                      0 ||
-                                  spot.x.toInt() == cumulativeData.length - 1;
-                            },
-                          ),
-                          belowBarData: BarAreaData(
-                            show: true,
-                            color: gradientColor,
-                            gradient: LinearGradient(
-                              colors: [
-                                gradientColor,
-                                gradientColor.withOpacity(0.1),
-                              ],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                            ),
-                          ),
-                        ),
-                      ],
+                        );
+                      },
                     ),
                   ),
+                  leftTitles: AxisTitles(
+                    axisNameWidget: Text(
+                      'Cumulative Customers',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontSize: 12,
+                      ),
+                    ),
+                    axisNameSize: 25,
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 40,
+                      interval: maxCount > 10 ? maxCount / 5 : 1,
+                      getTitlesWidget: (value, meta) {
+                        if (value == 0) return const SizedBox();
+                        if (value % 1 == 0 || maxCount > 20) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Text(
+                              value.toInt().toString(),
+                              style: TextStyle(
+                                color: Colors.grey[700],
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        }
+                        return const SizedBox();
+                      },
+                    ),
+                  ),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                ),
+                borderData: FlBorderData(
+                  show: true,
+                  border: Border(
+                    bottom: BorderSide(color: Colors.grey[300]!, width: 1),
+                    left: BorderSide(color: Colors.grey[300]!, width: 1),
+                  ),
+                ),
+                minX: 0,
+                maxX: (cumulativeData.length - 1).toDouble(),
+                minY: 0,
+                maxY: cumulativeData.isEmpty
+                    ? 10
+                    : (cumulativeData.last.count * 1.2)
+                        .toDouble(), // Add some space at the top
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: List.generate(cumulativeData.length, (index) {
+                      return FlSpot(
+                        index.toDouble(),
+                        cumulativeData[index].count.toDouble(),
+                      );
+                    }),
+                    isCurved: true,
+                    curveSmoothness: 0.3,
+                    color: lineColor,
+                    barWidth: 3,
+                    isStrokeCapRound: true,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, barData, index) {
+                        return FlDotCirclePainter(
+                          radius: 4,
+                          color: dotColor,
+                          strokeWidth: 2,
+                          strokeColor: Colors.white,
+                        );
+                      },
+                      checkToShowDot: (spot, barData) {
+                        // Show dots at regular intervals or for important points
+                        return cumulativeData.length <= 10 ||
+                            spot.x.toInt() %
+                                    ((cumulativeData.length / 5).ceil()) ==
+                                0 ||
+                            spot.x.toInt() == cumulativeData.length - 1;
+                      },
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: gradientColor,
+                      gradient: LinearGradient(
+                        colors: [
+                          gradientColor,
+                          gradientColor.withOpacity(0.1),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
