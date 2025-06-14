@@ -32,18 +32,23 @@ class DataPoint {
       parsedDueDate = DateTime.now();
     } else {
       try {
-        // Attempt 1: "dd.MM.yyyy" (as per example "17.05.2025")
-        parsedDueDate = DateFormat('dd.MM.yyyy').parse(rawDueDate);
+        // Attempt 1: "yyyy-MM-dd" format
+        parsedDueDate = DateFormat('yyyy-MM-dd').parse(rawDueDate);
       } catch (e1) {
         try {
-          // Attempt 2: Standard ISO 8601 parsing
-          parsedDueDate = DateTime.parse(rawDueDate);
+          // Attempt 2: "dd.MM.yyyy" (as per example "17.05.2025")
+          parsedDueDate = DateFormat('dd.MM.yyyy').parse(rawDueDate);
         } catch (e2) {
           try {
-            // Attempt 3: "dd/MM/yyyy" (common alternative)
-            parsedDueDate = DateFormat('dd/MM/yyyy').parse(rawDueDate);
+            // Attempt 3: Standard ISO 8601 parsing
+            parsedDueDate = DateTime.parse(rawDueDate);
           } catch (e3) {
-            parsedDueDate = DateTime.now(); // Fallback if all parsing fails
+            try {
+              // Attempt 4: "dd/MM/yyyy" (common alternative)
+              parsedDueDate = DateFormat('dd/MM/yyyy').parse(rawDueDate);
+            } catch (e4) {
+              parsedDueDate = DateTime.now(); // Fallback if all parsing fails
+            }
           }
         }
       }
@@ -158,6 +163,36 @@ class _DataAnalyticsPageState extends State<DataAnalyticsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          _isLoading
+              ? Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.0,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          Theme.of(context).primaryColor),
+                    ),
+                  ),
+                )
+              : IconButton(
+                  icon: Icon(
+                    Icons.refresh,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                  tooltip: 'Refresh data',
+                  onPressed: () {
+                    _fetchData(); // Refresh all data
+                  },
+                ),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null

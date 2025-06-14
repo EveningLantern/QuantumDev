@@ -19,10 +19,21 @@ class DueDateLineChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Debug print to check if data is being received
+    debugPrint('DueDateLineChart build: received ${data.length} data points');
+    debugPrint('Date range in chart: $startDate to $endDate');
+
     // Filter data based on the selected date range
     final List<DueDateData> filteredData = data.where((item) {
-      return !item.date.isBefore(startDate) && !item.date.isAfter(endDate);
+      final bool isInRange =
+          !item.date.isBefore(startDate) && !item.date.isAfter(endDate);
+      if (!isInRange) {
+        debugPrint('Filtering out date ${item.date} - outside range');
+      }
+      return isInRange;
     }).toList();
+
+    debugPrint('After filtering: ${filteredData.length} data points remain');
 
     // Sort the filtered data by date
     filteredData.sort((a, b) => a.date.compareTo(b.date));
@@ -40,10 +51,25 @@ class DueDateLineChart extends StatelessWidget {
     final List<DueDateData> cumulativeData = [];
     int runningTotal = 0;
 
+    debugPrint(
+        'Calculating cumulative data from ${filteredData.length} filtered points');
+
     for (var item in filteredData) {
       runningTotal += item.count;
+      debugPrint(
+          'Date: ${item.date}, Count: ${item.count}, Running Total: $runningTotal');
       cumulativeData.add(DueDateData(date: item.date, count: runningTotal));
     }
+
+    debugPrint('Final cumulative data has ${cumulativeData.length} points');
+    if (cumulativeData.isNotEmpty) {
+      debugPrint(
+          'First point: ${cumulativeData.first.date} - ${cumulativeData.first.count}');
+      debugPrint(
+          'Last point: ${cumulativeData.last.date} - ${cumulativeData.last.count}');
+    }
+
+    debugPrint('Rendering DueDateLineChart container');
 
     return Container(
       height: 350, // Increased height for better visibility

@@ -393,12 +393,24 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
       // Ensure we don't exceed 10 days
       final int daysToShow = daysDifference > 10 ? 10 : daysDifference + 1;
 
+      debugPrint(
+          'Processing due dates for chart. Date range: $_startDate to $_endDate');
+      debugPrint('Days difference: $daysDifference, Days to show: $daysToShow');
+
       for (int i = 0; i < daysToShow; i++) {
         final date = _startDate.add(Duration(days: i));
-        dueDateCounts[keyFormat.format(date)] = 0;
+        final dateKey = keyFormat.format(date);
+        dueDateCounts[dateKey] = 0;
+        debugPrint('Initialized date: $dateKey with count 0');
       }
 
       // Count customers by due date
+      int totalCustomersWithValidDates = 0;
+      int customersInSelectedRange = 0;
+
+      debugPrint(
+          'Counting customers by due date from ${_allCustomers.length} total customers');
+
       for (var customer in _allCustomers) {
         try {
           // Use our tryParseDate function to handle various date formats
@@ -406,13 +418,23 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
 
           if (dueDate == null) {
             // Skip customers with unparseable dates
+            debugPrint(
+                'Customer ${customer.customerName} has unparseable due date: ${customer.dueDate}');
             continue;
           }
+
+          totalCustomersWithValidDates++;
 
           // Only count if within our selected range
           if (!dueDate.isBefore(_startDate) && !dueDate.isAfter(_endDate)) {
             final String dateKey = formatDateToYYYYMMDD(dueDate);
             dueDateCounts[dateKey] = (dueDateCounts[dateKey] ?? 0) + 1;
+            customersInSelectedRange++;
+            debugPrint(
+                'Customer ${customer.customerName} due date: $dateKey, count now: ${dueDateCounts[dateKey]}');
+          } else {
+            debugPrint(
+                'Customer ${customer.customerName} due date: ${dueDate.toString()} - outside selected range');
           }
         } catch (e) {
           // Skip unparseable dates
@@ -421,17 +443,38 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
         }
       }
 
+      debugPrint(
+          'Total customers with valid dates: $totalCustomersWithValidDates');
+      debugPrint('Customers in selected range: $customersInSelectedRange');
+
       // Convert to list of DueDateData objects
+      debugPrint(
+          'Converting due date counts to DueDateData objects. Map size: ${dueDateCounts.length}');
+
       final List<DueDateData> dueDateDistribution =
           dueDateCounts.entries.map((entry) {
+        final date = keyFormat.parse(entry.key);
+        final count = entry.value;
+        debugPrint('Creating DueDateData: date=$date, count=$count');
         return DueDateData(
-          date: keyFormat.parse(entry.key),
-          count: entry.value,
+          date: date,
+          count: count,
         );
       }).toList();
 
       // Sort by date
       dueDateDistribution.sort((a, b) => a.date.compareTo(b.date));
+
+      debugPrint(
+          'Final dueDateDistribution size: ${dueDateDistribution.length}');
+      if (dueDateDistribution.isNotEmpty) {
+        debugPrint(
+            'First item: ${dueDateDistribution.first.date} - ${dueDateDistribution.first.count}');
+        debugPrint(
+            'Last item: ${dueDateDistribution.last.date} - ${dueDateDistribution.last.count}');
+      } else {
+        debugPrint('dueDateDistribution is empty!');
+      }
 
       setState(() {
         _dashboardData = AdminDashboardProcessedData(
@@ -442,6 +485,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
           dueDateDistribution: dueDateDistribution,
         );
         _isLoading = false;
+
+        // Debug print to verify data is set correctly
+        debugPrint(
+            'Dashboard data set. dueDateDistribution size: ${_dashboardData!.dueDateDistribution.length}');
       });
     } catch (e) {
       setState(() {
@@ -1671,13 +1718,49 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
   Widget _buildDueDateLineChart() {
     // Use the DueDateLineChart widget from lineGraph.dart
     if (_dashboardData == null) {
+      debugPrint('DueDateLineChart: _dashboardData is null');
       return const Center(child: CircularProgressIndicator());
     }
 
+    // Debug print to check if we have data
+    debugPrint(
+        'DueDateLineChart: dueDateDistribution length: ${_dashboardData!.dueDateDistribution.length}');
+
+    if (_dashboardData!.dueDateDistribution.isEmpty) {
+      debugPrint('DueDateLineChart: No data available for chart');
+      return Container(
+        height: 350,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Text(
+            'No renewal data available for the chart',
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
     // Convert our local DueDateData to the one from lineGraph.dart using the alias
-    final convertedData = _dashboardData!.dueDateDistribution.map((item) =>
-        // Create a new instance of DueDateData from lineGraph.dart
-        line_graph.DueDateData(date: item.date, count: item.count)).toList();
+    final convertedData = _dashboardData!.dueDateDistribution.map((item) {
+      // Debug print to check data conversion
+      debugPrint('Converting data: date=${item.date}, count=${item.count}');
+      return line_graph.DueDateData(date: item.date, count: item.count);
+    }).toList();
+
+    // Debug print date range
+    debugPrint(
+        'Date range: ${_startDate.toString()} to ${_endDate.toString()}');
 
     return line_graph.DueDateLineChart(
       data: convertedData,
