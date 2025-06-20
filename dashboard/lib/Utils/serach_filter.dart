@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:ui' show lerpDouble;
 
 class SearchFilter extends StatefulWidget {
   final Function(String) onSearchChanged;
@@ -15,7 +14,8 @@ class SearchFilter extends StatefulWidget {
     required this.onSearchChanged,
     required this.onClearSearch,
     required this.searchQuery,
-    this.hintText = 'Search by ID, Name, or Vehicle Number...',
+    this.hintText =
+        'Search by ID, Name, Vehicle Number, Due Date, Contact, Model, or Insurer...',
     this.filterOptions = const ['All', 'ID', 'Name', 'Vehicle Number'],
     required this.onFilterChanged,
     required this.selectedFilter,
@@ -508,6 +508,10 @@ class SearchFilterUtils {
     String Function(T) getId,
     String Function(T) getName,
     String Function(T) getVehicleNumber,
+    String Function(T) getDueDate,
+    String Function(T) getContactNumber,
+    String Function(T) getModel,
+    String Function(T) getInsurer,
   ) {
     if (searchQuery.isEmpty) return items;
 
@@ -526,10 +530,14 @@ class SearchFilterUtils {
           return getVehicleNumber(item).toLowerCase() == query;
         case 'All':
         default:
-          // For 'All', allow partial matching in any field
+          // For 'All', allow partial matching in any field (all 7 fields)
           return getId(item).toLowerCase().contains(query) ||
               getName(item).toLowerCase().contains(query) ||
-              getVehicleNumber(item).toLowerCase().contains(query);
+              getVehicleNumber(item).toLowerCase().contains(query) ||
+              getDueDate(item).toLowerCase().contains(query) ||
+              getContactNumber(item).toLowerCase().contains(query) ||
+              getModel(item).toLowerCase().contains(query) ||
+              getInsurer(item).toLowerCase().contains(query);
       }
     }).toList();
   }

@@ -139,13 +139,13 @@ class FormattingToolbar extends StatelessWidget {
               // Import/Export Section
               _buildSection([
                 IconButton(
-                  icon: const Icon(Icons.file_upload),
+                  icon: const Icon(Icons.file_download),
                   tooltip: 'Import Excel',
                   color: Colors.green[700],
                   onPressed: onImportExcel,
                 ),
                 IconButton(
-                  icon: const Icon(Icons.file_download),
+                  icon: const Icon(Icons.file_upload),
                   tooltip: 'Export Excel',
                   color: Colors.blue[700],
                   onPressed: onExportExcel,
@@ -188,11 +188,43 @@ class FormattingToolbar extends StatelessWidget {
                     itemBuilder: (BuildContext context) => _professionalFonts
                         .map((font) => PopupMenuItem<String>(
                               value: font,
-                              child: Text(
-                                font,
-                                style: TextStyle(
-                                  fontFamily: font,
-                                  fontSize: 14,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: font == currentFontFamily
+                                      ? Theme.of(context)
+                                          .primaryColor
+                                          .withOpacity(0.1)
+                                      : null,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                child: Row(
+                                  children: [
+                                    if (font == currentFontFamily)
+                                      Icon(
+                                        Icons.check,
+                                        size: 16,
+                                        color: Theme.of(context).primaryColor,
+                                      ),
+                                    if (font == currentFontFamily)
+                                      const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        font,
+                                        style: TextStyle(
+                                          fontFamily: font,
+                                          fontSize: 14,
+                                          fontWeight: font == currentFontFamily
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          color: font == currentFontFamily
+                                              ? Theme.of(context).primaryColor
+                                              : null,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ))

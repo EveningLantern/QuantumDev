@@ -123,8 +123,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
   late Animation<double> _animation;
 
   // For date range selection
-  DateTime _startDate = DateTime.now();
-  DateTime _endDate = DateTime.now().add(const Duration(days: 30));
+  DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+  DateTime _endDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day).add(const Duration(days: 30));
   List<CustomerData> _allCustomers = [];
 
   // For tracking earliest and latest due dates
@@ -204,13 +204,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
       final response = await http
           .get(Uri.parse(
               Endpoints.getAllEndpoint)) // Using endpoint from endpoints.dart
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 30)); // Increased timeout for larger datasets
 
       if (response.statusCode == 200) {
         final List<dynamic> jsonData = json.decode(response.body);
         _allCustomers = jsonData
             .map((item) => CustomerData.fromJson(item as Map<String, dynamic>))
             .toList();
+        
+        // Debug print to show total records fetched
+        debugPrint('Total records fetched from API: ${_allCustomers.length}');
       } else {
         setState(() {
           _errorMessage =
@@ -308,9 +311,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
             continue;
           }
 
-          // Check if due date is within the selected range
-          if (dueDate.isAfter(_startDate.subtract(const Duration(days: 1))) &&
-              dueDate.isBefore(_endDate.add(const Duration(days: 1)))) {
+          // Check if due date is within the selected range (compare date parts only, ignore time)
+          final DateTime dueDateOnly = DateTime(dueDate.year, dueDate.month, dueDate.day);
+          final DateTime startDateOnly = DateTime(_startDate.year, _startDate.month, _startDate.day);
+          final DateTime endDateOnly = DateTime(_endDate.year, _endDate.month, _endDate.day);
+          
+          if (!dueDateOnly.isBefore(startDateOnly) && !dueDateOnly.isAfter(endDateOnly)) {
             upcomingDuesList.add(UpcomingDueInfo(
                 customerName: customer.customerName,
                 dueDate: displayFormat.format(dueDate)));
@@ -398,9 +404,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
       final Map<String, int> dueDateCounts = {};
       final DateFormat keyFormat = DateFormat('yyyy-MM-dd');
 
-      // Initialize all dates in the selected range
+      // Initialize all dates in the selected range (no limit on days)
       final int daysDifference = _endDate.difference(_startDate).inDays;
-      final int daysToShow = daysDifference + 1;
+      final int daysToShow = daysDifference + 1; // Show all days in the range
 
       debugPrint(
           'Processing due dates for chart. Date range: $_startDate to $_endDate');
@@ -434,8 +440,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
 
           totalCustomersWithValidDates++;
 
-          // Only count if within our selected range
-          if (!dueDate.isBefore(_startDate) && !dueDate.isAfter(_endDate)) {
+          // Only count if within our selected range (compare date parts only, ignore time)
+          final DateTime dueDateOnly = DateTime(dueDate.year, dueDate.month, dueDate.day);
+          final DateTime startDateOnly = DateTime(_startDate.year, _startDate.month, _startDate.day);
+          final DateTime endDateOnly = DateTime(_endDate.year, _endDate.month, _endDate.day);
+          
+          if (!dueDateOnly.isBefore(startDateOnly) && !dueDateOnly.isAfter(endDateOnly)) {
             final String dateKey = formatDateToYYYYMMDD(dueDate);
             dueDateCounts[dateKey] = (dueDateCounts[dateKey] ?? 0) + 1;
             customersInSelectedRange++;
@@ -648,9 +658,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
 
         // If we have valid date range, initialize all dates in the range
         if (earliestDate != null && latestDate != null) {
-          // Limit to a reasonable range (e.g., 60 days) if the range is too large
+          // Show all days in the range (no artificial limit)
           final int daysDifference = latestDate.difference(earliestDate).inDays;
-          final int daysToShow = daysDifference > 60 ? 60 : daysDifference + 1;
+          final int daysToShow = daysDifference + 1;
 
           for (int i = 0; i < daysToShow; i++) {
             final date = earliestDate.add(Duration(days: i));
@@ -673,10 +683,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
                 dueDate = ddMMyyyyFormat.parse(customer.dueDate);
               }
 
-              // Only count if within our display range
-              if (!dueDate.isBefore(earliestDate) &&
-                  !dueDate.isAfter(
-                      earliestDate.add(Duration(days: daysToShow - 1)))) {
+              // Only count if within our display range (compare date parts only, ignore time)
+              final DateTime dueDateOnly = DateTime(dueDate.year, dueDate.month, dueDate.day);
+              final DateTime earliestDateOnly = DateTime(earliestDate.year, earliestDate.month, earliestDate.day);
+              final DateTime latestDateOnly = DateTime(latestDate.year, latestDate.month, latestDate.day);
+              
+              if (!dueDateOnly.isBefore(earliestDateOnly) && !dueDateOnly.isAfter(latestDateOnly)) {
                 final String dateKey = keyFormat.format(dueDate);
                 dueDateCounts[dateKey] = (dueDateCounts[dateKey] ?? 0) + 1;
               }
@@ -2191,9 +2203,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
 
     if (picked != null) {
       setState(() {
-        _startDate = picked.start;
-        _endDate = picked.end;
-      });
+        // Set date-only values (without timestamps)
+        _startDate = DateTime(picked.start.year, picked.start.month, picked.start.day);
+        _endDate = DateTime(picked.end.year, picked.end.month, picked.end.day);
+        });
+      }
 
       // Reprocess data with the new date range
       _processData();
@@ -2202,11 +2216,53 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
 
   Widget _buildDueDateLineChart() {
     // Use the DueDateLineChart widget from lineGraph.dart
-    // The chart now fetches its own data from the API
+    if (_dashboardData == null) {
+      debugPrint('DueDateLineChart: _dashboardData is null');
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    // Debug print to check if we have data
     debugPrint(
-        'Building DueDateLineChart with date range: ${_startDate.toString()} to ${_endDate.toString()}');
+        'DueDateLineChart: dueDateDistribution length: ${_dashboardData!.dueDateDistribution.length}');
+
+    if (_dashboardData!.dueDateDistribution.isEmpty) {
+      debugPrint('DueDateLineChart: No data available for chart');
+      return Container(
+        height: 350,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Text(
+            'No renewal data available for the chart',
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    // Convert our local DueDateData to the one from lineGraph.dart using the alias
+    final convertedData = _dashboardData!.dueDateDistribution.map((item) {
+      // Debug print to check data conversion
+      debugPrint('Converting data: date=${item.date}, count=${item.count}');
+      return line_graph.DueDateData(date: item.date, count: item.count);
+    }).toList();
+
+    // Debug print date range
+    debugPrint(
+        'Date range: ${_startDate.toString()} to ${_endDate.toString()}');
 
     return line_graph.DueDateLineChart(
+      data: convertedData,
       startDate: _startDate,
       endDate: _endDate,
       onDateRangePressed: () => _selectDateRange(context),
@@ -2495,12 +2551,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
       },
     );
   }
-}
 
-// Build the upcoming dues section
-
-// This method is now part of the _AdminDashboardPageState class
-Widget _buildUpcomingDuesContent(List<UpcomingDueInfo> dues, Color textColor) {
+  // Build the upcoming dues section
+  Widget _buildUpcomingDuesContent(List<UpcomingDueInfo> dues, Color textColor) {
   if (dues.isEmpty) {
     return Text(
       'No upcoming renewals in the next 30 days.',
@@ -2657,10 +2710,10 @@ Widget _buildUpcomingDuesContent(List<UpcomingDueInfo> dues, Color textColor) {
       ),
     ],
   );
-}
+  }
 
-// This method is kept for backward compatibility but not used in the new design
-Widget _buildTopListContent(List<String> items, Color textColor) {
+  // This method is kept for backward compatibility but not used in the new design
+  Widget _buildTopListContent(List<String> items, Color textColor) {
   if (items.isEmpty ||
       (items.length == 1 &&
           (items[0] == 'No provider data' || items[0] == 'No model data'))) {
@@ -2804,4 +2857,7 @@ class _DashboardCardState extends State<DashboardCard> {
       ),
     );
   }
+}
+
+// Closing brace for _AdminDashboardPageState class
 }

@@ -2,41 +2,297 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import '../endpoints.dart';
+import '../parsing/date_parsing.dart';
 
-class DueDateLineChart extends StatelessWidget {
-  final List<DueDateData> data;
+class DueDateLineChart extends StatefulWidget {
   final DateTime startDate;
   final DateTime endDate;
   final Function() onDateRangePressed;
 
   const DueDateLineChart({
     Key? key,
-    required this.data,
     required this.startDate,
     required this.endDate,
     required this.onDateRangePressed,
   }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    // Debug print to check if data is being received
-    debugPrint('DueDateLineChart build: received ${data.length} data points');
-    debugPrint('Date range in chart: $startDate to $endDate');
+  State<DueDateLineChart> createState() => _DueDateLineChartState();
+}
 
-    // Filter data based on the selected date range
-    final List<DueDateData> filteredData = data.where((item) {
-      final bool isInRange =
-          !item.date.isBefore(startDate) && !item.date.isAfter(endDate);
-      if (!isInRange) {
-        debugPrint('Filtering out date ${item.date} - outside range');
+class _DueDateLineChartState extends State<DueDateLineChart> {
+  List<DueDateData> _allData = [];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchData();
+  }
+
+  @override
+  void didUpdateWidget(DueDateLineChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Refetch data if date range changes
+    if (oldWidget.startDate != widget.startDate ||
+        oldWidget.endDate != widget.endDate) {
+      _fetchData();
+    }
+  }
+
+  Future<void> _fetchData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final response = await http
+          .get(Uri.parse(Endpoints.getAllEndpoint))
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> jsonData = json.decode(response.body);
+
+        // Process all data and create due date distribution
+        final Map<String, int> dueDateCounts = <String, int>{};
+        final DateFormat keyFormat = DateFormat('yyyy-MM-dd');
+
+        debugPrint(
+            'Raw API Response: ${response.body.substring(0, response.body.length > 500 ? 500 : response.body.length)}...');
+        debugPrint('Processing ${jsonData.length} records for line chart');
+
+        for (int i = 0; i < jsonData.length; i++) {
+          final Map<String, dynamic> customer =
+              jsonData[i] as Map<String, dynamic>;
+
+          debugPrint('Processing record $i: ${customer.keys.toList()}');
+
+          // Parse the due date - try different possible field names
+          String? dueDateString;
+          if (customer.containsKey('dueDate')) {
+            dueDateString = customer['dueDate'] as String?;
+          } else if (customer.containsKey('due_date')) {
+            dueDateString = customer['due_date'] as String?;
+          } else if (customer.containsKey('renewalDate')) {
+            dueDateString = customer['renewalDate'] as String?;
+          } else if (customer.containsKey('renewal_date')) {
+            dueDateString = customer['renewal_date'] as String?;
+          }
+
+          debugPrint('Found due date string: $dueDateString');
+
+          if (dueDateString != null && dueDateString.isNotEmpty) {
+            // Try parsing the date directly as YYYY-MM-DD first
+            DateTime? dueDate;
+            try {
+              if (dueDateString.contains('T')) {
+                // ISO format
+                dueDate = DateTime.parse(dueDateString);
+              } else if (dueDateString.contains('-') &&
+                  dueDateString.length >= 10) {
+                // YYYY-MM-DD format
+                dueDate = DateTime.parse(dueDateString.substring(0, 10));
+              } else {
+                // Use the parsing utility as fallback
+                dueDate = tryParseDate(dueDateString);
+              }
+            } catch (e) {
+              debugPrint('Error parsing date $dueDateString: $e');
+              dueDate = tryParseDate(dueDateString);
+            }
+
+            if (dueDate != null) {
+              final String dateKey = keyFormat.format(dueDate);
+              dueDateCounts[dateKey] = (dueDateCounts[dateKey] ?? 0) + 1;
+              debugPrint(
+                  'Successfully processed due date: $dateKey, count now: ${dueDateCounts[dateKey]}');
+            } else {
+              debugPrint('Failed to parse due date: $dueDateString');
+            }
+          } else {
+            debugPrint('No due date found in record $i');
+          }
+        }
+
+        // Convert to DueDateData objects
+        final List<DueDateData> allData = dueDateCounts.entries.map((entry) {
+          final date = keyFormat.parse(entry.key);
+          final count = entry.value;
+          return DueDateData(date: date, count: count);
+        }).toList();
+
+        // Sort by date
+        allData.sort((a, b) => a.date.compareTo(b.date));
+
+        debugPrint('Total processed data points: ${allData.length}');
+        if (allData.isNotEmpty) {
+          debugPrint(
+              'Date range in data: ${allData.first.date} to ${allData.last.date}');
+        }
+
+        setState(() {
+          _allData = allData;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = 'Failed to load data: ${response.statusCode}';
+          _isLoading = false;
+        });
       }
-      return isInRange;
-    }).toList();
+    } on SocketException {
+      setState(() {
+        _errorMessage = 'Network error. Please check your connection.';
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error fetching data: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Container(
+        height: 350,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).shadowColor.withOpacity(0.1),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Container(
+        height: 350,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).shadowColor.withOpacity(0.1),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.error_outline,
+                color: Theme.of(context).colorScheme.error,
+                size: 48,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage!,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _fetchData,
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Debug print to check if data is being received
+    debugPrint(
+        'DueDateLineChart build: received ${_allData.length} data points');
+    debugPrint('Date range in chart: ${widget.startDate} to ${widget.endDate}');
+
+    // Filter data based on the selected date range - ensure we traverse ALL data
+    final List<DueDateData> filteredData = [];
+
+    debugPrint('Starting to filter data...');
+    debugPrint('Filter range: ${widget.startDate} to ${widget.endDate}');
+    debugPrint('Available data points: ${_allData.length}');
+
+    for (int i = 0; i < _allData.length; i++) {
+      final item = _allData[i];
+
+      // More detailed date comparison
+      final bool isAfterStart = !item.date.isBefore(widget.startDate);
+      final bool isBeforeEnd = !item.date.isAfter(widget.endDate);
+      final bool isInRange = isAfterStart && isBeforeEnd;
+
+      debugPrint(
+          'Item $i: date=${item.date.toString().substring(0, 10)}, count=${item.count}');
+      debugPrint(
+          '  - After start (${widget.startDate.toString().substring(0, 10)}): $isAfterStart');
+      debugPrint(
+          '  - Before end (${widget.endDate.toString().substring(0, 10)}): $isBeforeEnd');
+      debugPrint('  - In range: $isInRange');
+
+      if (isInRange) {
+        filteredData.add(item);
+        debugPrint('  ✓ Added to filtered data');
+      } else {
+        debugPrint('  ✗ Filtered out');
+      }
+    }
 
     debugPrint('After filtering: ${filteredData.length} data points remain');
 
     // Sort the filtered data by date
     filteredData.sort((a, b) => a.date.compareTo(b.date));
+
+    // Create a complete date range with 0 values for missing dates
+    final List<DueDateData> dailyData = [];
+    final Map<String, int> dataMap = {};
+    final DateFormat keyFormat = DateFormat('yyyy-MM-dd');
+
+    // Convert filtered data to a map for quick lookup
+    for (var item in filteredData) {
+      final String dateKey = keyFormat.format(item.date);
+      dataMap[dateKey] = item.count;
+    }
+
+    // Generate all dates in the range
+    DateTime currentDate = DateTime(
+        widget.startDate.year, widget.startDate.month, widget.startDate.day);
+    final DateTime endDate =
+        DateTime(widget.endDate.year, widget.endDate.month, widget.endDate.day);
+
+    debugPrint('Filling date range from $currentDate to $endDate');
+
+    while (!currentDate.isAfter(endDate)) {
+      final String dateKey = keyFormat.format(currentDate);
+      final int count = dataMap[dateKey] ?? 0; // Use 0 if no data for this date
+
+      dailyData.add(DueDateData(date: currentDate, count: count));
+      debugPrint('Added date: $dateKey with count: $count');
+
+      currentDate = currentDate.add(const Duration(days: 1));
+    }
 
     final ThemeData theme = Theme.of(context);
     final Color lineColor = theme.colorScheme.primary;
@@ -51,28 +307,20 @@ class DueDateLineChart extends StatelessWidget {
 
     // Find the maximum count for scaling
     final int maxCount =
-        filteredData.isEmpty ? 1 : filteredData.map((e) => e.count).reduce(max);
+        dailyData.isEmpty ? 1 : dailyData.map((e) => e.count).reduce(max);
 
-    // Calculate cumulative counts for each date
-    final List<DueDateData> cumulativeData = [];
-    int runningTotal = 0;
-
-    debugPrint(
-        'Calculating cumulative data from ${filteredData.length} filtered points');
-
-    for (var item in filteredData) {
-      runningTotal += item.count;
+    debugPrint('Final daily data has ${dailyData.length} points');
+    if (dailyData.isNotEmpty) {
       debugPrint(
-          'Date: ${item.date}, Count: ${item.count}, Running Total: $runningTotal');
-      cumulativeData.add(DueDateData(date: item.date, count: runningTotal));
-    }
+          'First point: ${dailyData.first.date} - ${dailyData.first.count}');
+      debugPrint(
+          'Last point: ${dailyData.last.date} - ${dailyData.last.count}');
 
-    debugPrint('Final cumulative data has ${cumulativeData.length} points');
-    if (cumulativeData.isNotEmpty) {
-      debugPrint(
-          'First point: ${cumulativeData.first.date} - ${cumulativeData.first.count}');
-      debugPrint(
-          'Last point: ${cumulativeData.last.date} - ${cumulativeData.last.count}');
+      // Show a few sample points to verify the data
+      for (int i = 0; i < dailyData.length && i < 5; i++) {
+        debugPrint(
+            'Sample point $i: ${dailyData[i].date.toString().substring(0, 10)} - ${dailyData[i].count}');
+      }
     }
 
     debugPrint('Rendering DueDateLineChart container');
@@ -98,7 +346,7 @@ class DueDateLineChart extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Upcoming Renewals Trend',
+                'Daily Renewals Trend',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -108,13 +356,13 @@ class DueDateLineChart extends StatelessWidget {
               IconButton(
                 icon: Icon(Icons.date_range, color: theme.colorScheme.primary),
                 tooltip: 'Select Date Range',
-                onPressed: onDateRangePressed,
+                onPressed: widget.onDateRangePressed,
               ),
             ],
           ),
           // Display selected date range
           Text(
-            'Range: ${DateFormat('dd MMM, yyyy').format(startDate)} - ${DateFormat('dd MMM, yyyy').format(endDate)}',
+            'Range: ${DateFormat('dd MMM, yyyy').format(widget.startDate)} - ${DateFormat('dd MMM, yyyy').format(widget.endDate)}',
             style: TextStyle(
               fontSize: 12,
               color: subtitleColor,
@@ -136,7 +384,7 @@ class DueDateLineChart extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  'Cumulative renewals',
+                  'Daily renewals',
                   style: TextStyle(
                     fontSize: 11,
                     color: subtitleColor,
@@ -155,15 +403,15 @@ class DueDateLineChart extends StatelessWidget {
                     getTooltipItems: (List<LineBarSpot> touchedSpots) {
                       return touchedSpots.map((spot) {
                         final int index = spot.x.toInt();
-                        if (index < 0 || index >= cumulativeData.length) {
+                        if (index < 0 || index >= dailyData.length) {
                           return null;
                         }
 
-                        final date = cumulativeData[index].date;
-                        final count = cumulativeData[index].count;
+                        final date = dailyData[index].date;
+                        final count = dailyData[index].count;
 
                         return LineTooltipItem(
-                          '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} total',
+                          '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} on this day',
                           TextStyle(
                             color: theme.colorScheme.onPrimary,
                             fontWeight: FontWeight.bold,
@@ -197,16 +445,16 @@ class DueDateLineChart extends StatelessWidget {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 50, // More space for two-line labels
-                      interval: cumulativeData.length > 10
-                          ? (cumulativeData.length / 5).ceil().toDouble()
+                      interval: dailyData.length > 10
+                          ? (dailyData.length / 5).ceil().toDouble()
                           : 1,
                       getTitlesWidget: (value, meta) {
                         final int index = value.toInt();
-                        if (index < 0 || index >= cumulativeData.length) {
+                        if (index < 0 || index >= dailyData.length) {
                           return const SizedBox();
                         }
 
-                        final date = cumulativeData[index].date;
+                        final date = dailyData[index].date;
                         return Padding(
                           padding: const EdgeInsets.only(top: 8.0),
                           child: Column(
@@ -238,7 +486,7 @@ class DueDateLineChart extends StatelessWidget {
                   ),
                   leftTitles: AxisTitles(
                     axisNameWidget: Text(
-                      'Cumulative Customers',
+                      'Daily Customers',
                       style: TextStyle(
                         color: subtitleColor,
                         fontSize: 12,
@@ -283,18 +531,18 @@ class DueDateLineChart extends StatelessWidget {
                   ),
                 ),
                 minX: 0,
-                maxX: (cumulativeData.length - 1).toDouble(),
+                maxX: (dailyData.length - 1).toDouble(),
                 minY: 0,
-                maxY: cumulativeData.isEmpty
+                maxY: dailyData.isEmpty
                     ? 10
-                    : (cumulativeData.last.count * 1.2)
+                    : (dailyData.map((e) => e.count).reduce(max) * 1.2)
                         .toDouble(), // Add some space at the top
                 lineBarsData: [
                   LineChartBarData(
-                    spots: List.generate(cumulativeData.length, (index) {
+                    spots: List.generate(dailyData.length, (index) {
                       return FlSpot(
                         index.toDouble(),
-                        cumulativeData[index].count.toDouble(),
+                        dailyData[index].count.toDouble(),
                       );
                     }),
                     isCurved: true,
@@ -314,11 +562,10 @@ class DueDateLineChart extends StatelessWidget {
                       },
                       checkToShowDot: (spot, barData) {
                         // Show dots at regular intervals or for important points
-                        return cumulativeData.length <= 10 ||
-                            spot.x.toInt() %
-                                    ((cumulativeData.length / 5).ceil()) ==
+                        return dailyData.length <= 10 ||
+                            spot.x.toInt() % ((dailyData.length / 5).ceil()) ==
                                 0 ||
-                            spot.x.toInt() == cumulativeData.length - 1;
+                            spot.x.toInt() == dailyData.length - 1;
                       },
                     ),
                     belowBarData: BarAreaData(

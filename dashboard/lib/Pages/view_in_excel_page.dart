@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For clipboard functionality
 import 'dart:convert'; // For JSON decoding/encoding
 import 'dart:io'; // For file operations
 import 'dart:math'; // For mathematical functions like exp
@@ -12,6 +13,15 @@ import '../Utils/formatting_toolbar.dart'; // Your formatting toolbar
 import '../Utils/serach_filter.dart'; // Search and filter functionality
 import '../endpoints.dart'; // Backend endpoints
 import '../parsing/date_parsing.dart'; // For date parsing functions
+
+// Custom Intent classes for keyboard shortcuts
+class CopyIntent extends Intent {
+  const CopyIntent();
+}
+
+class PasteIntent extends Intent {
+  const PasteIntent();
+}
 
 // Data model for a customer
 class Customer {
@@ -207,6 +217,8 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   List<Map<String, dynamic>> _redoStack = [];
   static const int _maxUndoRedoStackSize = 10; // Limit to 10 history states
   Map<String, dynamic>? _pendingState; // State before current edit
+  bool _isUndoRedoOperation =
+      false; // Flag to prevent saving state during undo/redo
 
   // --- Column Resizing State Variables ---
   Map<String, double> _columnWidths = {
@@ -279,10 +291,282 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     setState(() {
       if (_selectedCellKey == cellKey) {
         _selectedCellKey = null; // Deselect if tapped again
+        _currentFontFamily =
+            'Arial'; // Reset to default when no cell is selected
       } else {
         _selectedCellKey = cellKey;
+        // Update current font family to match the selected cell's font family
+        final cellStyle = _cellStyles[cellKey] ?? CellStyle();
+        _currentFontFamily = cellStyle.fontFamily;
       }
     });
+  }
+
+  // Copy and Paste functionality
+  Future<void> _copyCellValue() async {
+    if (_selectedCellKey == null) return;
+
+    // Get the cell value
+    String cellValue = _getCellValueForKey(_selectedCellKey!);
+
+    // Copy to clipboard
+    await Clipboard.setData(ClipboardData(text: cellValue));
+
+    // Show feedback to user
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.copy, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Text('Copied: "$cellValue"'),
+            ],
+          ),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _pasteCellValue() async {
+    if (_selectedCellKey == null) return;
+
+    try {
+      // Get clipboard data
+      ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (data?.text == null) return;
+
+      String clipboardText = data!.text!;
+
+      // Parse the cell key to get customer ID and column name
+      List<String> parts = _selectedCellKey!.split('_');
+      if (parts.length != 2) return;
+
+      String customerId = parts[0];
+      String columnName = parts[1];
+
+      // Don't allow pasting into ID column
+      if (columnName == colId) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.warning, color: Colors.white, size: 16),
+                SizedBox(width: 8),
+                Text('Cannot paste into ID column'),
+              ],
+            ),
+            duration: const Duration(seconds: 2),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+        return;
+      }
+
+      // Save current state for undo
+      _saveStateForUndo();
+
+      // Update the cell value
+      _updateCellValue(_selectedCellKey!, clipboardText);
+
+      // Update the customer data in the backend
+      await _updateCustomerField(customerId, columnName, clipboardText);
+
+      // Show feedback to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.paste, color: Colors.white, size: 16),
+                const SizedBox(width: 8),
+                Text('Pasted: "$clipboardText"'),
+              ],
+            ),
+            duration: const Duration(seconds: 2),
+            backgroundColor: Colors.blue,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Text('Paste failed: $e'),
+            ],
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
+  }
+
+  String _getCellValueForKey(String cellKey) {
+    // Check if cell has a custom value (formula result)
+    if (_cellValues.containsKey(cellKey)) {
+      return _cellValues[cellKey]!;
+    }
+
+    // Parse the cell key to get customer ID and column name
+    List<String> parts = cellKey.split('_');
+    if (parts.length != 2) return '';
+
+    String customerId = parts[0];
+    String columnName = parts[1];
+
+    // Find the customer
+    Customer? customer = _customers.firstWhere(
+      (c) => c.id == customerId,
+      orElse: () => Customer(
+        id: '',
+        name: '',
+        dueDate: '',
+        vehicleNumber: '',
+        contactNumber: '',
+        model: '',
+        insurer: '',
+      ),
+    );
+
+    if (customer.id.isEmpty) return '';
+
+    // Return the appropriate field value
+    switch (columnName) {
+      case colId:
+        return customer.id;
+      case colName:
+        return customer.name;
+      case colDueDate:
+        return customer.dueDate;
+      case colVehicleNumber:
+        return customer.vehicleNumber;
+      case colContactNumber:
+        return customer.contactNumber;
+      case colModel:
+        return customer.model;
+      case colInsurer:
+        return customer.insurer;
+      default:
+        return '';
+    }
+  }
+
+  void _updateCellValue(String cellKey, String newValue) {
+    setState(() {
+      // Store the new value in the cell values map
+      _cellValues[cellKey] = newValue;
+    });
+  }
+
+  Future<void> _updateCustomerField(
+      String customerId, String columnName, String newValue) async {
+    // Find the customer in the list
+    int customerIndex = _customers.indexWhere((c) => c.id == customerId);
+    if (customerIndex == -1) return;
+
+    Customer customer = _customers[customerIndex];
+
+    // Update the appropriate field
+    switch (columnName) {
+      case colName:
+        customer.name = newValue;
+        break;
+      case colDueDate:
+        customer.dueDate = newValue;
+        break;
+      case colVehicleNumber:
+        customer.vehicleNumber = newValue;
+        break;
+      case colContactNumber:
+        customer.contactNumber = newValue;
+        break;
+      case colModel:
+        customer.model = newValue;
+        break;
+      case colInsurer:
+        customer.insurer = newValue;
+        break;
+      default:
+        return;
+    }
+
+    // Update the customer in the list
+    setState(() {
+      _customers[customerIndex] = customer;
+      _applySearchAndFilters(); // Refresh displayed customers
+    });
+
+    // Send update to backend using the correct endpoint and format
+    try {
+      // Create query parameters with id and the specific field being updated
+      Map<String, String> queryParams = {'id': customerId};
+
+      // Add the specific field being updated
+      switch (columnName) {
+        case colName:
+          queryParams['name'] = newValue;
+          break;
+        case colDueDate:
+          queryParams['due_date'] = newValue;
+          break;
+        case colVehicleNumber:
+          queryParams['vehicle_number'] = newValue;
+          break;
+        case colContactNumber:
+          queryParams['contact_number'] = newValue;
+          break;
+        case colModel:
+          queryParams['model'] = newValue;
+          break;
+        case colInsurer:
+          queryParams['insurer'] = newValue;
+          break;
+        default:
+          return;
+      }
+
+      final updateUrl = Uri.parse(Endpoints.updateEndpoint)
+          .replace(queryParameters: queryParams);
+
+      final response = await http.put(
+        updateUrl,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        // If backend update fails, revert the change
+        await _fetchDataFromServer();
+        throw Exception('Backend update failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      // Revert the change and show error
+      await _fetchDataFromServer();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   CellStyle _getCurrentCellStyle() {
@@ -292,7 +576,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   }
 
   void _applyStyleChange(CellStyle newStyle) {
-    if (_selectedCellKey != null) {
+    if (_selectedCellKey != null && !_isUndoRedoOperation) {
       // Save current state for undo before making changes
       _saveStateForUndo();
 
@@ -2050,12 +2334,39 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   }
 
   void _saveStateForUndo() {
+    // Don't save state during undo/redo operations to prevent infinite loops
+    if (_isUndoRedoOperation) return;
+
     // Save the current state for undo operations (for styling and cell value changes)
     final currentState = {
-      'customers': List<Customer>.from(_customers),
-      'cellStyles': Map<String, CellStyle>.from(_cellStyles),
+      'customers': _customers
+          .map((c) => Customer(
+                id: c.id,
+                name: c.name,
+                dueDate: c.dueDate,
+                vehicleNumber: c.vehicleNumber,
+                contactNumber: c.contactNumber,
+                model: c.model,
+                insurer: c.insurer,
+              ))
+          .toList(),
+      'cellStyles':
+          Map<String, CellStyle>.from(_cellStyles.map((key, value) => MapEntry(
+              key,
+              CellStyle(
+                isBold: value.isBold,
+                isUnderline: value.isUnderline,
+                isItalic: value.isItalic,
+                isStrikethrough: value.isStrikethrough,
+                highlightColor: value.highlightColor,
+                textColor: value.textColor,
+                fontFamily: value.fontFamily,
+              )))),
       'cellValues': Map<String, String>.from(_cellValues),
+      'selectedCellKey': _selectedCellKey,
+      'currentFontFamily': _currentFontFamily,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'actionType': 'user_action', // Track the type of action
     };
 
     // Add to undo stack
@@ -2068,13 +2379,21 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     if (_undoStack.length > _maxUndoRedoStackSize) {
       _undoStack.removeAt(0);
     }
+
+    print('Undo stack size: ${_undoStack.length}'); // Debug info
   }
 
   Future<void> _undo() async {
     if (_undoStack.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nothing to undo'),
+          content: Row(
+            children: [
+              Icon(Icons.info, color: Colors.white, size: 16),
+              SizedBox(width: 8),
+              Text('Nothing to undo'),
+            ],
+          ),
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 2),
         ),
@@ -2082,66 +2401,113 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
       return;
     }
 
-    // Show loading indicator
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text('Undoing changes...'),
-          ],
-        ),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        duration: const Duration(seconds: 1),
-      ),
-    );
+    // Set flag to prevent saving state during undo operation
+    _isUndoRedoOperation = true;
 
     try {
       // Save current state to redo stack before undoing
-      final currentCustomers = List<Customer>.from(_customers);
-      final currentCellStyles = Map<String, CellStyle>.from(_cellStyles);
-
-      _redoStack.add({
-        'customers': currentCustomers,
-        'cellStyles': currentCellStyles,
+      final currentState = {
+        'customers': _customers
+            .map((c) => Customer(
+                  id: c.id,
+                  name: c.name,
+                  dueDate: c.dueDate,
+                  vehicleNumber: c.vehicleNumber,
+                  contactNumber: c.contactNumber,
+                  model: c.model,
+                  insurer: c.insurer,
+                ))
+            .toList(),
+        'cellStyles': Map<String, CellStyle>.from(
+            _cellStyles.map((key, value) => MapEntry(
+                key,
+                CellStyle(
+                  isBold: value.isBold,
+                  isUnderline: value.isUnderline,
+                  isItalic: value.isItalic,
+                  isStrikethrough: value.isStrikethrough,
+                  highlightColor: value.highlightColor,
+                  textColor: value.textColor,
+                  fontFamily: value.fontFamily,
+                )))),
+        'cellValues': Map<String, String>.from(_cellValues),
+        'selectedCellKey': _selectedCellKey,
+        'currentFontFamily': _currentFontFamily,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+        'actionType': 'redo_state',
+      };
+
+      // Add current state to redo stack
+      _redoStack.add(currentState);
+
+      // Limit redo stack size
+      if (_redoStack.length > _maxUndoRedoStackSize) {
+        _redoStack.removeAt(0);
+      }
 
       // Get the previous state
       final previousState = _undoStack.removeLast();
-      final previousCustomer = previousState['customer'] as Customer;
+      final previousCustomers = previousState['customers'] as List<Customer>;
       final previousCellStyles =
           previousState['cellStyles'] as Map<String, CellStyle>;
+      final previousCellValues =
+          previousState['cellValues'] as Map<String, String>;
+      final previousSelectedCellKey =
+          previousState['selectedCellKey'] as String?;
+      final previousCurrentFontFamily =
+          previousState['currentFontFamily'] as String;
 
-      // Update the customer in the backend
-      await _updateCustomerInServer(previousCustomer);
+      // Update customers in backend if they changed
+      List<Customer> customersToUpdate = [];
+      for (int i = 0; i < previousCustomers.length; i++) {
+        final prevCustomer = previousCustomers[i];
+        final currentCustomer = _customers.firstWhere(
+          (c) => c.id == prevCustomer.id,
+          orElse: () => Customer(
+              id: '',
+              name: '',
+              dueDate: '',
+              vehicleNumber: '',
+              contactNumber: '',
+              model: '',
+              insurer: ''),
+        );
+
+        if (currentCustomer.id.isNotEmpty &&
+            (prevCustomer.name != currentCustomer.name ||
+                prevCustomer.dueDate != currentCustomer.dueDate ||
+                prevCustomer.vehicleNumber != currentCustomer.vehicleNumber ||
+                prevCustomer.contactNumber != currentCustomer.contactNumber ||
+                prevCustomer.model != currentCustomer.model ||
+                prevCustomer.insurer != currentCustomer.insurer)) {
+          customersToUpdate.add(prevCustomer);
+        }
+      }
+
+      // Update backend for changed customers
+      for (final customer in customersToUpdate) {
+        await _updateCustomerInServer(customer);
+      }
 
       // Update local state
-      final customerIndex =
-          _customers.indexWhere((c) => c.id == previousCustomer.id);
-      if (customerIndex != -1) {
-        setState(() {
-          _customers[customerIndex] = previousCustomer;
-          _cellStyles = previousCellStyles;
-        });
-        _applySearchAndFilters();
-      }
+      setState(() {
+        _customers = previousCustomers;
+        _cellStyles = previousCellStyles;
+        _cellValues = previousCellValues;
+        _selectedCellKey = previousSelectedCellKey;
+        _currentFontFamily = previousCurrentFontFamily;
+      });
+
+      _applySearchAndFilters();
+      _saveCellStyles(); // Save the restored styles
 
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.undo, color: Colors.white),
-              const SizedBox(width: 10),
+              const Icon(Icons.undo, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
               const Text('Undo successful'),
             ],
           ),
@@ -2149,6 +2515,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
           duration: const Duration(seconds: 2),
         ),
       );
+
+      print(
+          'Undo completed. Undo stack: ${_undoStack.length}, Redo stack: ${_redoStack.length}');
     } catch (e) {
       // Restore the state if backend update failed
       if (_redoStack.isNotEmpty) {
@@ -2157,11 +2526,22 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Undo failed: $e'),
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Text('Undo failed: ${e.toString()}'),
+            ],
+          ),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 3),
         ),
       );
+
+      print('Undo failed: $e');
+    } finally {
+      // Reset the flag
+      _isUndoRedoOperation = false;
     }
   }
 
@@ -2169,7 +2549,13 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     if (_redoStack.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Nothing to redo'),
+          content: Row(
+            children: [
+              Icon(Icons.info, color: Colors.white, size: 16),
+              SizedBox(width: 8),
+              Text('Nothing to redo'),
+            ],
+          ),
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 2),
         ),
@@ -2177,77 +2563,109 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
       return;
     }
 
-    // Show loading indicator
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text('Redoing changes...'),
-          ],
-        ),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        duration: const Duration(seconds: 1),
-      ),
-    );
+    // Set flag to prevent saving state during redo operation
+    _isUndoRedoOperation = true;
 
     try {
       // Save current state to undo stack before redoing
-      final currentCustomers = List<Customer>.from(_customers);
-      final currentCellStyles = Map<String, CellStyle>.from(_cellStyles);
-
-      // Create a state snapshot for undo
       final currentState = {
-        'customers': currentCustomers,
-        'cellStyles': currentCellStyles,
+        'customers': _customers
+            .map((c) => Customer(
+                  id: c.id,
+                  name: c.name,
+                  dueDate: c.dueDate,
+                  vehicleNumber: c.vehicleNumber,
+                  contactNumber: c.contactNumber,
+                  model: c.model,
+                  insurer: c.insurer,
+                ))
+            .toList(),
+        'cellStyles': Map<String, CellStyle>.from(
+            _cellStyles.map((key, value) => MapEntry(
+                key,
+                CellStyle(
+                  isBold: value.isBold,
+                  isUnderline: value.isUnderline,
+                  isItalic: value.isItalic,
+                  isStrikethrough: value.isStrikethrough,
+                  highlightColor: value.highlightColor,
+                  textColor: value.textColor,
+                  fontFamily: value.fontFamily,
+                )))),
+        'cellValues': Map<String, String>.from(_cellValues),
+        'selectedCellKey': _selectedCellKey,
+        'currentFontFamily': _currentFontFamily,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
+        'actionType': 'undo_state',
       };
 
       // Get the next state
       final nextState = _redoStack.removeLast();
       final nextCustomers = nextState['customers'] as List<Customer>;
       final nextCellStyles = nextState['cellStyles'] as Map<String, CellStyle>;
+      final nextCellValues = nextState['cellValues'] as Map<String, String>;
+      final nextSelectedCellKey = nextState['selectedCellKey'] as String?;
+      final nextCurrentFontFamily = nextState['currentFontFamily'] as String;
 
-      // Update all changed customers in the backend
-      for (int i = 0; i < nextCustomers.length && i < _customers.length; i++) {
-        if (nextCustomers[i].id == _customers[i].id) {
-          // Check if customer data is different
-          if (nextCustomers[i].name != _customers[i].name ||
-              nextCustomers[i].dueDate != _customers[i].dueDate ||
-              nextCustomers[i].vehicleNumber != _customers[i].vehicleNumber ||
-              nextCustomers[i].contactNumber != _customers[i].contactNumber ||
-              nextCustomers[i].model != _customers[i].model ||
-              nextCustomers[i].insurer != _customers[i].insurer) {
-            await _updateCustomerInServer(nextCustomers[i]);
-          }
+      // Update customers in backend if they changed
+      List<Customer> customersToUpdate = [];
+      for (int i = 0; i < nextCustomers.length; i++) {
+        final nextCustomer = nextCustomers[i];
+        final currentCustomer = _customers.firstWhere(
+          (c) => c.id == nextCustomer.id,
+          orElse: () => Customer(
+              id: '',
+              name: '',
+              dueDate: '',
+              vehicleNumber: '',
+              contactNumber: '',
+              model: '',
+              insurer: ''),
+        );
+
+        if (currentCustomer.id.isNotEmpty &&
+            (nextCustomer.name != currentCustomer.name ||
+                nextCustomer.dueDate != currentCustomer.dueDate ||
+                nextCustomer.vehicleNumber != currentCustomer.vehicleNumber ||
+                nextCustomer.contactNumber != currentCustomer.contactNumber ||
+                nextCustomer.model != currentCustomer.model ||
+                nextCustomer.insurer != currentCustomer.insurer)) {
+          customersToUpdate.add(nextCustomer);
         }
+      }
+
+      // Update backend for changed customers
+      for (final customer in customersToUpdate) {
+        await _updateCustomerInServer(customer);
       }
 
       // Add current state to undo stack after successful backend update
       _undoStack.add(currentState);
 
+      // Limit undo stack size
+      if (_undoStack.length > _maxUndoRedoStackSize) {
+        _undoStack.removeAt(0);
+      }
+
       // Update local state
       setState(() {
         _customers = nextCustomers;
         _cellStyles = nextCellStyles;
+        _cellValues = nextCellValues;
+        _selectedCellKey = nextSelectedCellKey;
+        _currentFontFamily = nextCurrentFontFamily;
       });
+
       _applySearchAndFilters();
+      _saveCellStyles(); // Save the restored styles
 
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.redo, color: Colors.white),
-              const SizedBox(width: 10),
+              const Icon(Icons.redo, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
               const Text('Redo successful'),
             ],
           ),
@@ -2255,14 +2673,28 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
           duration: const Duration(seconds: 2),
         ),
       );
+
+      print(
+          'Redo completed. Undo stack: ${_undoStack.length}, Redo stack: ${_redoStack.length}');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Redo failed: $e'),
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Text('Redo failed: ${e.toString()}'),
+            ],
+          ),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 3),
         ),
       );
+
+      print('Redo failed: $e');
+    } finally {
+      // Reset the flag
+      _isUndoRedoOperation = false;
     }
   }
 
@@ -2557,16 +2989,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
               _startCellEditing(customerId, columnName, displayText);
             }
           },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
+          child: Container(
             width: double.infinity,
             height: double.infinity,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            transform: (isHovered && !isSelected)
-                ? (Matrix4.identity()..scale(1.03))
-                : Matrix4.identity(),
-            transformAlignment: Alignment.center,
             decoration: BoxDecoration(
               color: _getCellBackgroundColor(style, isSelected, isHovered),
               border: isSelected
@@ -2575,42 +3000,55 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                   : isEditing
                       ? Border.all(color: Colors.blue, width: 2)
                       : null,
-              borderRadius: BorderRadius.circular(4.0),
             ),
-            child: isEditing
-                ? TextField(
-                    controller: _cellEditController,
-                    focusNode: _cellEditFocusNode,
-                    style: TextStyle(
-                      fontFamily: style.fontFamily,
-                      fontWeight:
-                          style.isBold ? FontWeight.bold : FontWeight.normal,
-                      fontStyle:
-                          style.isItalic ? FontStyle.italic : FontStyle.normal,
-                      decoration: _buildTextDecoration(style),
-                      color: _getEffectiveTextColor(style),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: double.infinity,
+              height: double.infinity,
+              alignment: Alignment.centerLeft,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+              transform: (isHovered && !isSelected)
+                  ? (Matrix4.identity()..scale(1.02))
+                  : Matrix4.identity(),
+              transformAlignment: Alignment.center,
+              child: isEditing
+                  ? TextField(
+                      controller: _cellEditController,
+                      focusNode: _cellEditFocusNode,
+                      style: TextStyle(
+                        fontFamily: style.fontFamily,
+                        fontWeight:
+                            style.isBold ? FontWeight.bold : FontWeight.normal,
+                        fontStyle: style.isItalic
+                            ? FontStyle.italic
+                            : FontStyle.normal,
+                        decoration: _buildTextDecoration(style),
+                        color: _getEffectiveTextColor(style),
+                      ),
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      onSubmitted: (value) =>
+                          _saveCellEdit(customerId, columnName),
+                      onTapOutside: (event) => _cancelCellEditing(),
+                    )
+                  : Text(
+                      displayText,
+                      style: TextStyle(
+                        fontFamily: style.fontFamily,
+                        fontWeight:
+                            style.isBold ? FontWeight.bold : FontWeight.normal,
+                        fontStyle: style.isItalic
+                            ? FontStyle.italic
+                            : FontStyle.normal,
+                        decoration: _buildTextDecoration(style),
+                        color: _getEffectiveTextColor(style),
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    onSubmitted: (value) =>
-                        _saveCellEdit(customerId, columnName),
-                    onTapOutside: (event) => _cancelCellEditing(),
-                  )
-                : Text(
-                    displayText,
-                    style: TextStyle(
-                      fontFamily: style.fontFamily,
-                      fontWeight:
-                          style.isBold ? FontWeight.bold : FontWeight.normal,
-                      fontStyle:
-                          style.isItalic ? FontStyle.italic : FontStyle.normal,
-                      decoration: _buildTextDecoration(style),
-                      color: _getEffectiveTextColor(style),
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+            ),
           ),
         ),
       ),
@@ -2711,15 +3149,6 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
   Future<void> _updateCustomerToServer() async {
     if (_formKey.currentState!.validate() && _editingCustomer != null) {
-      final updatedCustomerData = {
-        'name': _nameController.text,
-        'due_date': _dueDateController.text,
-        'vehicle_number': _vehicleNumberController.text,
-        'contact_number': _contactNumberController.text,
-        'model': _modelController.text,
-        'insurer': _insurerController.text,
-      };
-
       final String originalName = _editingCustomer!.name;
       final String originalModel = _editingCustomer!.model;
       final String originalVehicleNumber = _editingCustomer!.vehicleNumber;
@@ -2727,35 +3156,52 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
       Navigator.of(context).pop(); // Close dialog
 
       try {
-        final updateUrl =
-            Uri.parse('$_apiUrlBase/update').replace(queryParameters: {
-          'name': originalName,
-          'model': originalModel,
-          'vehicle_number': originalVehicleNumber,
-        });
+        // Update each field individually using the correct API format
+        final customerId = _editingCustomer!.id;
 
-        final response = await http
-            .put(
-              updateUrl,
-              headers: {'Content-Type': 'application/json'},
-              body: json.encode(updatedCustomerData),
-            )
-            .timeout(const Duration(seconds: 10));
+        // Update name if changed
+        if (_nameController.text != originalName) {
+          await _updateSingleField(customerId, 'name', _nameController.text);
+        }
 
-        if (response.statusCode == 200) {
+        // Update due_date if changed
+        if (_dueDateController.text != _editingCustomer!.dueDate) {
+          await _updateSingleField(
+              customerId, 'due_date', _dueDateController.text);
+        }
+
+        // Update vehicle_number if changed
+        if (_vehicleNumberController.text != originalVehicleNumber) {
+          await _updateSingleField(
+              customerId, 'vehicle_number', _vehicleNumberController.text);
+        }
+
+        // Update contact_number if changed
+        if (_contactNumberController.text != _editingCustomer!.contactNumber) {
+          await _updateSingleField(
+              customerId, 'contact_number', _contactNumberController.text);
+        }
+
+        // Update model if changed
+        if (_modelController.text != originalModel) {
+          await _updateSingleField(customerId, 'model', _modelController.text);
+        }
+        // Update insurer if changed
+        if (_insurerController.text != _editingCustomer!.insurer) {
+          await _updateSingleField(
+              customerId, 'insurer', _insurerController.text);
+        }
+
+        // All updates completed successfully
+        if (true) {
+          // Always true since _updateSingleField throws on error
+
           _fetchDataFromServer();
           _clearForm();
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text('Customer updated successfully!'),
                 backgroundColor: Colors.blue[700]),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    'Failed to update customer: ${response.statusCode} ${response.reasonPhrase}'),
-                backgroundColor: Colors.red[700]),
           );
         }
       } catch (e) {
@@ -2765,6 +3211,30 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
               backgroundColor: Colors.red[700]),
         );
       }
+    }
+  }
+
+  // Helper method to update a single field using the correct API format
+  Future<void> _updateSingleField(
+      String customerId, String fieldName, String newValue) async {
+    try {
+      final updateUrl =
+          Uri.parse(Endpoints.updateEndpoint).replace(queryParameters: {
+        'id': customerId,
+        fieldName: newValue,
+      });
+
+      final response = await http.put(
+        updateUrl,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        throw Exception(
+            'Failed to update $fieldName: ${response.statusCode} ${response.reasonPhrase}');
+      }
+    } catch (e) {
+      throw Exception('Error updating $fieldName: $e');
     }
   }
 
@@ -3095,36 +3565,33 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
   Future<void> _updateCustomerInServer(Customer customer) async {
     try {
-      // Create the update URL with the specific field being updated
-      // Format: https://manojsir-backend.vercel.app/update?id=183&contact_number=7046983554
-      String updateUrl;
+      // Create query parameters with id and the specific field being updated
+      Map<String, String> queryParams = {'id': customer.id};
 
+      // Determine which field is being updated (only one field should be non-empty)
       if (customer.name.isNotEmpty) {
-        updateUrl =
-            'https://manojsir-backend.vercel.app/update?id=${customer.id}&name=${Uri.encodeComponent(customer.name)}';
+        queryParams['name'] = customer.name;
       } else if (customer.dueDate.isNotEmpty) {
-        updateUrl =
-            'https://manojsir-backend.vercel.app/update?id=${customer.id}&due_date=${Uri.encodeComponent(customer.dueDate)}';
+        queryParams['due_date'] = customer.dueDate;
       } else if (customer.vehicleNumber.isNotEmpty) {
-        updateUrl =
-            'https://manojsir-backend.vercel.app/update?id=${customer.id}&vehicle_number=${Uri.encodeComponent(customer.vehicleNumber)}';
+        queryParams['vehicle_number'] = customer.vehicleNumber;
       } else if (customer.contactNumber.isNotEmpty) {
-        updateUrl =
-            'https://manojsir-backend.vercel.app/update?id=${customer.id}&contact_number=${Uri.encodeComponent(customer.contactNumber)}';
+        queryParams['contact_number'] = customer.contactNumber;
       } else if (customer.model.isNotEmpty) {
-        updateUrl =
-            'https://manojsir-backend.vercel.app/update?id=${customer.id}&model=${Uri.encodeComponent(customer.model)}';
+        queryParams['model'] = customer.model;
       } else if (customer.insurer.isNotEmpty) {
-        updateUrl =
-            'https://manojsir-backend.vercel.app/update?id=${customer.id}&insurer=${Uri.encodeComponent(customer.insurer)}';
+        queryParams['insurer'] = customer.insurer;
       } else {
         // No fields to update
         return;
       }
 
-      // Send PUT request to update the specific field
+      final updateUrl = Uri.parse(Endpoints.updateEndpoint)
+          .replace(queryParameters: queryParams);
+
+      // Send PUT request with only query parameters (no JSON body)
       final response = await http.put(
-        Uri.parse(updateUrl),
+        updateUrl,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 10));
 
@@ -3385,6 +3852,10 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
         (customer) => customer.id,
         (customer) => customer.name,
         (customer) => customer.vehicleNumber,
+        (customer) => customer.dueDate,
+        (customer) => customer.contactNumber,
+        (customer) => customer.model,
+        (customer) => customer.insurer,
       );
     }
 
@@ -3437,42 +3908,48 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
     // Apply sorting
     if (_sortColumnKey != null) {
-      filtered.sort((a, b) {
-        String aValue = '';
-        String bValue = '';
-        switch (_sortColumnKey) {
-          case colId:
-            aValue = a.id;
-            bValue = b.id;
-            break;
-          case colName:
-            aValue = a.name;
-            bValue = b.name;
-            break;
-          case colDueDate:
-            aValue = a.dueDate;
-            bValue = b.dueDate;
-            break;
-          case colVehicleNumber:
-            aValue = a.vehicleNumber;
-            bValue = b.vehicleNumber;
-            break;
-          case colContactNumber:
-            aValue = a.contactNumber;
-            bValue = b.contactNumber;
-            break;
-          case colModel:
-            aValue = a.model;
-            bValue = b.model;
-            break;
-          case colInsurer:
-            aValue = a.insurer;
-            bValue = b.insurer;
-            break;
+      if (_sortColumnKey == colId) {
+        // For ID column, simply reverse the order without any calculation
+        // Ascending = default backend order, Descending = reversed order
+        if (!_sortAscending) {
+          filtered = filtered.reversed.toList();
         }
-        int comparison = aValue.compareTo(bValue);
-        return _sortAscending ? comparison : -comparison;
-      });
+        // If ascending, keep the default order (no action needed)
+      } else {
+        // For other columns, use normal sorting logic
+        filtered.sort((a, b) {
+          String aValue = '';
+          String bValue = '';
+          switch (_sortColumnKey) {
+            case colName:
+              aValue = a.name;
+              bValue = b.name;
+              break;
+            case colDueDate:
+              aValue = a.dueDate;
+              bValue = b.dueDate;
+              break;
+            case colVehicleNumber:
+              aValue = a.vehicleNumber;
+              bValue = b.vehicleNumber;
+              break;
+            case colContactNumber:
+              aValue = a.contactNumber;
+              bValue = b.contactNumber;
+              break;
+            case colModel:
+              aValue = a.model;
+              bValue = b.model;
+              break;
+            case colInsurer:
+              aValue = a.insurer;
+              bValue = b.insurer;
+              break;
+          }
+          int comparison = aValue.compareTo(bValue);
+          return _sortAscending ? comparison : -comparison;
+        });
+      }
     }
 
     setState(() {
@@ -3529,8 +4006,8 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                     padding: const EdgeInsets.only(right: 8.0),
                     child: Icon(
                       _sortAscending
-                          ? Icons.arrow_upward_rounded
-                          : Icons.arrow_downward_rounded,
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
                       size: 16,
                       color: Theme.of(context).brightness == Brightness.dark
                           ? Colors.white // Glowing white in dark mode
@@ -3651,389 +4128,435 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   @override
   Widget build(BuildContext context) {
     final currentStyle = _getCurrentCellStyle();
-    return Scaffold(
-      backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-            // Search Bar (conditionally visible)
-            if (_isSearchVisible) ...[
-              SearchFilter(
-                onSearchChanged: _onSearchChanged,
-                onClearSearch: _onClearSearch,
-                searchQuery: _searchQuery,
-                onFilterChanged: _onFilterChanged,
-                selectedFilter: _selectedSearchFilter,
-              ),
-              const SizedBox(height: 10),
-            ],
-            // Always display FormattingToolbar
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10.0),
-              child: FormattingToolbar(
-                isBoldActive: currentStyle.isBold,
-                isUnderlineActive: currentStyle.isUnderline,
-                isItalicActive: currentStyle.isItalic,
-                isStrikethroughActive: currentStyle.isStrikethrough,
-                onToggleBold: _toggleBold,
-                onToggleUnderline: _toggleUnderline,
-                onToggleItalic: _toggleItalic,
-                onToggleStrikethrough: _toggleStrikethrough,
-                onPickTextColor: _pickTextColor,
-                onImportExcel: _importExcel,
-                onExportExcel: _exportExcel,
-                onChangeFontStyle: _changeFontStyle,
-                onInsertToday: _insertToday,
-                onInsertEdate: _insertEdate,
-                onInsertNetworkdays: _insertNetworkdays,
-                onInsertMin: _insertMin,
-                onInsertMax: _insertMax,
-                onDeleteRecord:
-                    _deleteRecord, // Add delete record functionality
-                onInsertCountIf: _insertCountIf, // Add Count If functionality
-                currentFontFamily: _currentFontFamily,
-                isEnabled: _selectedCellKey != null,
-                onInsertSigmoid: _insertSigmoid,
-                onInsertIntegration: _insertIntegration,
-                onUndo: _undo,
-                onRedo: _redo,
-              ),
+    return Shortcuts(
+        shortcuts: <LogicalKeySet, Intent>{
+          LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyC):
+              const CopyIntent(),
+          LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyV):
+              const PasteIntent(),
+        },
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            CopyIntent: CallbackAction<CopyIntent>(
+              onInvoke: (CopyIntent intent) => _copyCellValue(),
             ),
-
-            // Function Result Display
-            if (_showFunctionResult && _functionResult != null)
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                width: double.infinity,
+            PasteIntent: CallbackAction<PasteIntent>(
+              onInvoke: (PasteIntent intent) => _pasteCellValue(),
+            ),
+          },
+          child: Focus(
+            autofocus: true,
+            child: Scaffold(
+              backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+              body: Padding(
                 padding: const EdgeInsets.all(16.0),
-                margin: const EdgeInsets.only(bottom: 10.0),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(8.0),
-                  border: Border.all(
-                      color: _functionResultColor.withOpacity(0.5), width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _functionResultColor.withOpacity(0.1),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    )
-                  ],
-                ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Function Result:',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 18),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () {
-                            setState(() {
-                              _showFunctionResult = false;
-                            });
-                          },
-                        ),
-                      ],
+                    const SizedBox(height: 20),
+                    // Search Bar (conditionally visible)
+                    if (_isSearchVisible) ...[
+                      SearchFilter(
+                        onSearchChanged: _onSearchChanged,
+                        onClearSearch: _onClearSearch,
+                        searchQuery: _searchQuery,
+                        onFilterChanged: _onFilterChanged,
+                        selectedFilter: _selectedSearchFilter,
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    // Always display FormattingToolbar
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10.0),
+                      child: FormattingToolbar(
+                        isBoldActive: currentStyle.isBold,
+                        isUnderlineActive: currentStyle.isUnderline,
+                        isItalicActive: currentStyle.isItalic,
+                        isStrikethroughActive: currentStyle.isStrikethrough,
+                        onToggleBold: _toggleBold,
+                        onToggleUnderline: _toggleUnderline,
+                        onToggleItalic: _toggleItalic,
+                        onToggleStrikethrough: _toggleStrikethrough,
+                        onPickTextColor: _pickTextColor,
+                        onImportExcel: _importExcel,
+                        onExportExcel: _exportExcel,
+                        onChangeFontStyle: _changeFontStyle,
+                        onInsertToday: _insertToday,
+                        onInsertEdate: _insertEdate,
+                        onInsertNetworkdays: _insertNetworkdays,
+                        onInsertMin: _insertMin,
+                        onInsertMax: _insertMax,
+                        onDeleteRecord:
+                            _deleteRecord, // Add delete record functionality
+                        onInsertCountIf:
+                            _insertCountIf, // Add Count If functionality
+                        currentFontFamily: _currentFontFamily,
+                        isEnabled: _selectedCellKey != null,
+                        onInsertSigmoid: _insertSigmoid,
+                        onInsertIntegration: _insertIntegration,
+                        onUndo: _undo,
+                        onRedo: _redo,
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    Builder(
-                      builder: (context) {
-                        // Check if the result contains a calendar visualization
-                        bool hasCalendarView =
-                            _functionResult!.contains('\n\n');
 
-                        if (hasCalendarView) {
-                          // Split the message and the calendar view
-                          List<String> parts = _functionResult!.split('\n\n');
-                          String message = parts[0];
-                          String calendarView =
-                              parts.length > 1 ? parts[1] : '';
+                    // Function Result Display
+                    if (_showFunctionResult && _functionResult != null)
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16.0),
+                        margin: const EdgeInsets.only(bottom: 10.0),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(8.0),
+                          border: Border.all(
+                              color: _functionResultColor.withOpacity(0.5),
+                              width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _functionResultColor.withOpacity(0.1),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            )
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Function Result:',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey[800],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 18),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showFunctionResult = false;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Builder(
+                              builder: (context) {
+                                // Check if the result contains a calendar visualization
+                                bool hasCalendarView =
+                                    _functionResult!.contains('\n\n');
 
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Main message with icon
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(
-                                    message.contains('passed')
-                                        ? Icons.warning_amber_rounded
-                                        : message.contains('today')
-                                            ? Icons.today_rounded
-                                            : message.contains('left')
-                                                ? Icons.event_available_rounded
-                                                : Icons.info_outline_rounded,
-                                    color: _functionResultColor,
-                                    size: 24,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Flexible(
-                                    child: Text(
-                                      message,
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: _functionResultColor,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                if (hasCalendarView) {
+                                  // Split the message and the calendar view
+                                  List<String> parts =
+                                      _functionResult!.split('\n\n');
+                                  String message = parts[0];
+                                  String calendarView =
+                                      parts.length > 1 ? parts[1] : '';
 
-                              // Calendar visualization
-                              if (calendarView.isNotEmpty)
-                                Container(
-                                  margin: const EdgeInsets.only(top: 16),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border:
-                                        Border.all(color: Colors.grey[300]!),
-                                  ),
-                                  child: Column(
+                                  return Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        'Working Days Calendar:',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                          color: Colors.grey[800],
-                                        ),
+                                      // Main message with icon
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Icon(
+                                            message.contains('passed')
+                                                ? Icons.warning_amber_rounded
+                                                : message.contains('today')
+                                                    ? Icons.today_rounded
+                                                    : message.contains('left')
+                                                        ? Icons
+                                                            .event_available_rounded
+                                                        : Icons
+                                                            .info_outline_rounded,
+                                            color: _functionResultColor,
+                                            size: 24,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Flexible(
+                                            child: Text(
+                                              message,
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: _functionResultColor,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        calendarView,
-                                        style: TextStyle(
-                                          fontFamily: 'monospace',
-                                          fontSize: 13,
-                                          height: 1.4,
-                                          color: Colors.grey[800],
+
+                                      // Calendar visualization
+                                      if (calendarView.isNotEmpty)
+                                        Container(
+                                          margin:
+                                              const EdgeInsets.only(top: 16),
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey[50],
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            border: Border.all(
+                                                color: Colors.grey[300]!),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Working Days Calendar:',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14,
+                                                  color: Colors.grey[800],
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                calendarView,
+                                                style: TextStyle(
+                                                  fontFamily: 'monospace',
+                                                  fontSize: 13,
+                                                  height: 1.4,
+                                                  color: Colors.grey[800],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  );
+                                } else {
+                                  // Regular message with icon (no calendar)
+                                  return Row(
+                                    children: [
+                                      Icon(
+                                        _functionResult!.contains('passed by')
+                                            ? Icons.warning_amber_rounded
+                                            : _functionResult!.contains('today')
+                                                ? Icons.today_rounded
+                                                : _functionResult!
+                                                        .contains('days left')
+                                                    ? Icons
+                                                        .event_available_rounded
+                                                    : Icons
+                                                        .info_outline_rounded,
+                                        color: _functionResultColor,
+                                        size: 24,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Flexible(
+                                        child: Text(
+                                          _functionResult!,
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            color: _functionResultColor,
+                                          ),
+                                          softWrap: true,
+                                          overflow: TextOverflow.visible,
                                         ),
                                       ),
                                     ],
-                                  ),
-                                ),
-                            ],
-                          );
-                        } else {
-                          // Regular message with icon (no calendar)
-                          return Row(
-                            children: [
-                              Icon(
-                                _functionResult!.contains('passed by')
-                                    ? Icons.warning_amber_rounded
-                                    : _functionResult!.contains('today')
-                                        ? Icons.today_rounded
-                                        : _functionResult!.contains('days left')
-                                            ? Icons.event_available_rounded
-                                            : Icons.info_outline_rounded,
-                                color: _functionResultColor,
-                                size: 24,
-                              ),
-                              const SizedBox(width: 12),
-                              Flexible(
-                                child: Text(
-                                  _functionResult!,
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // const SizedBox(height: 20), // Original spacing, adjust as needed
+                    if (_isLoading)
+                      const Expanded(
+                          child: Center(child: CircularProgressIndicator()))
+                    else if (_errorMessage != null)
+                      Expanded(
+                          child: Center(
+                              child: Text(_errorMessage!,
                                   style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: _functionResultColor,
-                                  ),
-                                  softWrap: true,
-                                  overflow: TextOverflow.visible,
-                                ),
-                              ),
+                                      color: Colors.red[700], fontSize: 16))))
+                    else if (_customers.isEmpty)
+                      Expanded(
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.info_outline,
+                                  color: Colors.grey[400], size: 48),
+                              const SizedBox(height: 10),
+                              Text('No customer data found on the server.',
+                                  style: TextStyle(
+                                      fontSize: 16, color: Colors.grey[600])),
+                              const SizedBox(height: 10),
+                              ElevatedButton.icon(
+                                icon: Icon(Icons.refresh),
+                                label: Text('Try Refreshing'),
+                                onPressed: _fetchDataFromServer,
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blueAccent,
+                                    foregroundColor: Colors.white),
+                              )
                             ],
-                          );
-                        }
-                      },
-                    ),
+                          ),
+                        ),
+                      )
+                    else if (_displayedCustomers.isEmpty &&
+                        _customers.isNotEmpty)
+                      Expanded(
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.filter_list_off_rounded,
+                                  color: Colors.orange[400], size: 48),
+                              const SizedBox(height: 10),
+                              Text('No customers found.',
+                                  style: TextStyle(
+                                      fontSize: 16, color: Colors.orange[700]))
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.vertical,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: DataTable(
+                              headingRowColor:
+                                  MaterialStateProperty.resolveWith<Color?>(
+                                      (Set<MaterialState> states) {
+                                return Theme.of(context)
+                                    .appBarTheme
+                                    .backgroundColor; // Match app bar color
+                              }),
+                              dataRowColor:
+                                  MaterialStateProperty.resolveWith<Color?>(
+                                      (Set<MaterialState> states) {
+                                return Theme.of(context)
+                                    .appBarTheme
+                                    .backgroundColor
+                                    ?.withOpacity(
+                                        0.8); // Slightly transparent app bar color
+                              }),
+                              border: TableBorder.all(
+                                  color: Theme.of(context).primaryColor,
+                                  width: 1),
+                              columnSpacing:
+                                  0, // We'll handle spacing with column widths
+                              sortColumnIndex: _sortColumnKey == null
+                                  ? null
+                                  : [
+                                      colId,
+                                      colName,
+                                      colDueDate,
+                                      colVehicleNumber,
+                                      colContactNumber,
+                                      colModel,
+                                      colInsurer
+                                    ].indexOf(_sortColumnKey!),
+                              sortAscending: _sortAscending,
+                              columns: [
+                                _buildInteractiveDataColumn('ID', colId),
+                                _buildInteractiveDataColumn('Name', colName),
+                                _buildInteractiveDataColumn(
+                                    'Due Date', colDueDate),
+                                _buildInteractiveDataColumn(
+                                    'Vehicle No.', colVehicleNumber),
+                                _buildInteractiveDataColumn(
+                                    'Contact No.', colContactNumber),
+                                _buildInteractiveDataColumn('Model', colModel),
+                                _buildInteractiveDataColumn(
+                                    'Insurer', colInsurer),
+                              ],
+                              rows: _displayedCustomers.map((customer) {
+                                return DataRow(
+                                  cells: [
+                                    _buildStyledCell(
+                                        customer.id, colId, customer.id),
+                                    _buildStyledCell(
+                                        customer.id, colName, customer.name),
+                                    _buildStyledCell(customer.id, colDueDate,
+                                        customer.dueDate),
+                                    _buildStyledCell(
+                                        customer.id,
+                                        colVehicleNumber,
+                                        customer.vehicleNumber),
+                                    _buildStyledCell(
+                                        customer.id,
+                                        colContactNumber,
+                                        customer.contactNumber),
+                                    _buildStyledCell(
+                                        customer.id, colModel, customer.model),
+                                    _buildStyledCell(customer.id, colInsurer,
+                                        customer.insurer),
+                                  ],
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
-
-            // const SizedBox(height: 20), // Original spacing, adjust as needed
-            if (_isLoading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else if (_errorMessage != null)
-              Expanded(
-                  child: Center(
-                      child: Text(_errorMessage!,
-                          style:
-                              TextStyle(color: Colors.red[700], fontSize: 16))))
-            else if (_customers.isEmpty)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.info_outline,
-                          color: Colors.grey[400], size: 48),
-                      const SizedBox(height: 10),
-                      Text('No customer data found on the server.',
-                          style:
-                              TextStyle(fontSize: 16, color: Colors.grey[600])),
-                      const SizedBox(height: 10),
-                      ElevatedButton.icon(
-                        icon: Icon(Icons.refresh),
-                        label: Text('Try Refreshing'),
-                        onPressed: _fetchDataFromServer,
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
-                            foregroundColor: Colors.white),
-                      )
-                    ],
+              floatingActionButton: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FloatingActionButton(
+                    // Search FAB
+                    onPressed: _toggleSearch,
+                    backgroundColor: _isSearchVisible
+                        ? Colors.orange[700]
+                        : Colors.purple[700],
+                    foregroundColor: Colors.white,
+                    elevation: 6.0,
+                    heroTag: 'searchFab', // Unique heroTag
+                    tooltip:
+                        _isSearchVisible ? 'Hide Search' : 'Search Records',
+                    child: Icon(
+                        _isSearchVisible ? Icons.search_off : Icons.search),
                   ),
-                ),
-              )
-            else if (_displayedCustomers.isEmpty && _customers.isNotEmpty)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.filter_list_off_rounded,
-                          color: Colors.orange[400], size: 48),
-                      const SizedBox(height: 10),
-                      Text('No customers found.',
-                          style: TextStyle(
-                              fontSize: 16, color: Colors.orange[700]))
-                    ],
+                  const SizedBox(height: 16),
+                  FloatingActionButton(
+                    // Refresh FAB
+                    onPressed: _fetchDataFromServer,
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    elevation: 6.0,
+                    heroTag: 'refreshFab', // Unique heroTag
+                    tooltip: 'Refresh Data',
+                    child: const Icon(Icons.refresh_rounded),
                   ),
-                ),
-              )
-            else
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      headingRowColor:
-                          MaterialStateProperty.resolveWith<Color?>(
-                              (Set<MaterialState> states) {
-                        return Theme.of(context)
-                            .appBarTheme
-                            .backgroundColor; // Match app bar color
-                      }),
-                      dataRowColor: MaterialStateProperty.resolveWith<Color?>(
-                          (Set<MaterialState> states) {
-                        return Theme.of(context)
-                            .appBarTheme
-                            .backgroundColor
-                            ?.withOpacity(
-                                0.8); // Slightly transparent app bar color
-                      }),
-                      border: TableBorder.all(
-                          color: Theme.of(context).primaryColor, width: 1),
-                      columnSpacing:
-                          0, // We'll handle spacing with column widths
-                      sortColumnIndex: _sortColumnKey == null
-                          ? null
-                          : [
-                              colId,
-                              colName,
-                              colDueDate,
-                              colVehicleNumber,
-                              colContactNumber,
-                              colModel,
-                              colInsurer
-                            ].indexOf(_sortColumnKey!),
-                      sortAscending: _sortAscending,
-                      columns: [
-                        _buildInteractiveDataColumn('ID', colId),
-                        _buildInteractiveDataColumn('Name', colName),
-                        _buildInteractiveDataColumn('Due Date', colDueDate),
-                        _buildInteractiveDataColumn(
-                            'Vehicle No.', colVehicleNumber),
-                        _buildInteractiveDataColumn(
-                            'Contact No.', colContactNumber),
-                        _buildInteractiveDataColumn('Model', colModel),
-                        _buildInteractiveDataColumn('Insurer', colInsurer),
-                      ],
-                      rows: _displayedCustomers.map((customer) {
-                        return DataRow(
-                          cells: [
-                            _buildStyledCell(customer.id, colId, customer.id),
-                            _buildStyledCell(
-                                customer.id, colName, customer.name),
-                            _buildStyledCell(
-                                customer.id, colDueDate, customer.dueDate),
-                            _buildStyledCell(customer.id, colVehicleNumber,
-                                customer.vehicleNumber),
-                            _buildStyledCell(customer.id, colContactNumber,
-                                customer.contactNumber),
-                            _buildStyledCell(
-                                customer.id, colModel, customer.model),
-                            _buildStyledCell(
-                                customer.id, colInsurer, customer.insurer),
-                          ],
-                        );
-                      }).toList(),
-                    ),
+                  const SizedBox(height: 16),
+                  FloatingActionButton(
+                    // Add Customer FAB
+                    onPressed: () =>
+                        _animateFab(_showAddCustomerDialog), // Simplified call
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    elevation: 6.0,
+                    heroTag: 'addCustomerFab', // Unique heroTag
+                    tooltip: 'Add New Customer',
+                    child: const Icon(Icons.add),
                   ),
-                ),
+                ],
               ),
-          ],
-        ),
-      ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            // Search FAB
-            onPressed: _toggleSearch,
-            backgroundColor:
-                _isSearchVisible ? Colors.orange[700] : Colors.purple[700],
-            foregroundColor: Colors.white,
-            elevation: 6.0,
-            heroTag: 'searchFab', // Unique heroTag
-            tooltip: _isSearchVisible ? 'Hide Search' : 'Search Records',
-            child: Icon(_isSearchVisible ? Icons.search_off : Icons.search),
+            ),
           ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            // Refresh FAB
-            onPressed: _fetchDataFromServer,
-            backgroundColor: Colors.blueAccent,
-            foregroundColor: Colors.white,
-            elevation: 6.0,
-            heroTag: 'refreshFab', // Unique heroTag
-            tooltip: 'Refresh Data',
-            child: const Icon(Icons.refresh_rounded),
-          ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            // Add Customer FAB
-            onPressed: () =>
-                _animateFab(_showAddCustomerDialog), // Simplified call
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            foregroundColor: Theme.of(context).colorScheme.onPrimary,
-            elevation: 6.0,
-            heroTag: 'addCustomerFab', // Unique heroTag
-            tooltip: 'Add New Customer',
-            child: const Icon(Icons.add),
-          ),
-        ],
-      ),
-    );
+        ));
   }
 }
