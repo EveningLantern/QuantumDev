@@ -12,12 +12,16 @@ class DueDateLineChart extends StatefulWidget {
   final DateTime startDate;
   final DateTime endDate;
   final Function() onDateRangePressed;
+  final bool isExpanded;
+  final Function() onExpandPressed;
 
   const DueDateLineChart({
     Key? key,
     required this.startDate,
     required this.endDate,
     required this.onDateRangePressed,
+    this.isExpanded = false,
+    required this.onExpandPressed,
   }) : super(key: key);
 
   @override
@@ -159,11 +163,226 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
     }
   }
 
+  Widget _buildLineChart(
+      List<DueDateData> dailyData,
+      int maxCount,
+      ThemeData theme,
+      Color lineColor,
+      Color gradientColor,
+      Color dotColor,
+      Color backgroundColor,
+      Color subtitleColor,
+      Color gridColor,
+      Color borderColor) {
+    return LineChart(
+      LineChartData(
+        lineTouchData: LineTouchData(
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipColor: (touchedSpot) => theme.colorScheme.primary,
+            getTooltipItems: (List<LineBarSpot> touchedSpots) {
+              return touchedSpots.map((spot) {
+                final int index = spot.x.toInt();
+                if (index < 0 || index >= dailyData.length) {
+                  return null;
+                }
+
+                final date = dailyData[index].date;
+                final count = dailyData[index].count;
+
+                return LineTooltipItem(
+                  '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} on this day',
+                  TextStyle(
+                    color: theme.colorScheme.onPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: widget.isExpanded
+                        ? 16
+                        : 14, // Larger font when expanded
+                  ),
+                );
+              }).toList();
+            },
+            tooltipMargin: 8,
+            fitInsideHorizontally: true,
+            fitInsideVertically: true,
+          ),
+          handleBuiltInTouches: true,
+          touchSpotThreshold: 20,
+        ),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: maxCount > 10 ? maxCount / 5 : 1,
+          getDrawingHorizontalLine: (value) {
+            return FlLine(
+              color: gridColor,
+              strokeWidth: 1,
+              dashArray: [5, 5], // Dotted lines
+            );
+          },
+        ),
+        titlesData: FlTitlesData(
+          show: true,
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize:
+                  widget.isExpanded ? 60 : 50, // More space when expanded
+              interval: dailyData.length > 10
+                  ? (dailyData.length / 5).ceil().toDouble()
+                  : 1,
+              getTitlesWidget: (value, meta) {
+                final int index = value.toInt();
+                if (index < 0 || index >= dailyData.length) {
+                  return const SizedBox();
+                }
+
+                final date = dailyData[index].date;
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        DateFormat('MMM d').format(date),
+                        style: TextStyle(
+                          color: subtitleColor,
+                          fontSize: widget.isExpanded
+                              ? 13
+                              : 11, // Larger font when expanded
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      // Add day of week for better context
+                      Text(
+                        DateFormat('E')
+                            .format(date), // Day of week (e.g., Mon, Tue)
+                        style: TextStyle(
+                          color: subtitleColor.withOpacity(0.8),
+                          fontSize: widget.isExpanded
+                              ? 11
+                              : 9, // Larger font when expanded
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            axisNameWidget: Text(
+              'Daily Customers',
+              style: TextStyle(
+                color: subtitleColor,
+                fontSize:
+                    widget.isExpanded ? 14 : 12, // Larger font when expanded
+              ),
+            ),
+            axisNameSize:
+                widget.isExpanded ? 30 : 25, // More space when expanded
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize:
+                  widget.isExpanded ? 50 : 40, // More space when expanded
+              interval: maxCount > 10 ? maxCount / 5 : 1,
+              getTitlesWidget: (value, meta) {
+                if (value == 0) return const SizedBox();
+                if (value % 1 == 0 || maxCount > 20) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Text(
+                      value.toInt().toString(),
+                      style: TextStyle(
+                        color: subtitleColor,
+                        fontSize: widget.isExpanded
+                            ? 13
+                            : 11, // Larger font when expanded
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  );
+                }
+                return const SizedBox();
+              },
+            ),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+        ),
+        borderData: FlBorderData(
+          show: true,
+          border: Border(
+            bottom: BorderSide(color: borderColor, width: 1),
+            left: BorderSide(color: borderColor, width: 1),
+          ),
+        ),
+        minX: 0,
+        maxX: (dailyData.length - 1).toDouble(),
+        minY: 0,
+        maxY: dailyData.isEmpty
+            ? 10
+            : (dailyData.map((e) => e.count).reduce(max) * 1.2)
+                .toDouble(), // Add some space at the top
+        lineBarsData: [
+          LineChartBarData(
+            spots: List.generate(dailyData.length, (index) {
+              return FlSpot(
+                index.toDouble(),
+                dailyData[index].count.toDouble(),
+              );
+            }),
+            isCurved: true,
+            curveSmoothness: 0.3,
+            color: lineColor,
+            barWidth: widget.isExpanded ? 4 : 3, // Thicker line when expanded
+            isStrokeCapRound: true,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                return FlDotCirclePainter(
+                  radius:
+                      widget.isExpanded ? 5 : 4, // Larger dots when expanded
+                  color: dotColor,
+                  strokeWidth: 2,
+                  strokeColor: backgroundColor,
+                );
+              },
+              checkToShowDot: (spot, barData) {
+                // Show dots at regular intervals or for important points
+                return dailyData.length <= 10 ||
+                    spot.x.toInt() % ((dailyData.length / 5).ceil()) == 0 ||
+                    spot.x.toInt() == dailyData.length - 1;
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              color: gradientColor,
+              gradient: LinearGradient(
+                colors: [
+                  gradientColor,
+                  gradientColor.withOpacity(0.1),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Container(
-        height: 350,
+        height:
+            widget.isExpanded ? MediaQuery.of(context).size.height - 100 : 350,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
@@ -182,7 +401,8 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
 
     if (_errorMessage != null) {
       return Container(
-        height: 350,
+        height:
+            widget.isExpanded ? MediaQuery.of(context).size.height - 100 : 350,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
@@ -326,7 +546,9 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
     debugPrint('Rendering DueDateLineChart container');
 
     return Container(
-      height: 350, // Increased height for better visibility
+      height:
+          widget.isExpanded ? MediaQuery.of(context).size.height - 100 : 350,
+      width: widget.isExpanded ? double.infinity : null,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: backgroundColor,
@@ -348,15 +570,33 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
               Text(
                 'Daily Renewals Trend',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize:
+                      widget.isExpanded ? 24 : 18, // Larger font when expanded
                   fontWeight: FontWeight.bold,
                   color: textColor,
                 ),
               ),
-              IconButton(
-                icon: Icon(Icons.date_range, color: theme.colorScheme.primary),
-                tooltip: 'Select Date Range',
-                onPressed: widget.onDateRangePressed,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.date_range,
+                        color: theme.colorScheme.primary),
+                    tooltip: 'Select Date Range',
+                    onPressed: widget.onDateRangePressed,
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      widget.isExpanded
+                          ? Icons.close_fullscreen
+                          : Icons.open_in_full,
+                      color: theme.colorScheme.primary,
+                    ),
+                    tooltip:
+                        widget.isExpanded ? 'Collapse View' : 'Expand View',
+                    onPressed: widget.onExpandPressed,
+                  ),
+                ],
               ),
             ],
           ),
@@ -364,7 +604,8 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
           Text(
             'Range: ${DateFormat('dd MMM, yyyy').format(widget.startDate)} - ${DateFormat('dd MMM, yyyy').format(widget.endDate)}',
             style: TextStyle(
-              fontSize: 12,
+              fontSize:
+                  widget.isExpanded ? 14 : 12, // Larger font when expanded
               color: subtitleColor,
             ),
           ),
@@ -375,8 +616,10 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 12,
-                  height: 12,
+                  width: widget.isExpanded
+                      ? 14
+                      : 12, // Larger indicator when expanded
+                  height: widget.isExpanded ? 14 : 12,
                   decoration: BoxDecoration(
                     color: lineColor,
                     shape: BoxShape.circle,
@@ -386,7 +629,9 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
                 Text(
                   'Daily renewals',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: widget.isExpanded
+                        ? 13
+                        : 11, // Larger font when expanded
                     color: subtitleColor,
                   ),
                 ),
@@ -395,195 +640,17 @@ class _DueDateLineChartState extends State<DueDateLineChart> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: LineChart(
-              LineChartData(
-                lineTouchData: LineTouchData(
-                  touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (touchedSpot) => theme.colorScheme.primary,
-                    getTooltipItems: (List<LineBarSpot> touchedSpots) {
-                      return touchedSpots.map((spot) {
-                        final int index = spot.x.toInt();
-                        if (index < 0 || index >= dailyData.length) {
-                          return null;
-                        }
-
-                        final date = dailyData[index].date;
-                        final count = dailyData[index].count;
-
-                        return LineTooltipItem(
-                          '${DateFormat('EEE, MMM d, yyyy').format(date)}\n$count ${count == 1 ? 'customer' : 'customers'} on this day',
-                          TextStyle(
-                            color: theme.colorScheme.onPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        );
-                      }).toList();
-                    },
-                    tooltipMargin: 8,
-                    fitInsideHorizontally: true,
-                    fitInsideVertically: true,
-                  ),
-                  handleBuiltInTouches: true,
-                  touchSpotThreshold: 20,
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: maxCount > 10 ? maxCount / 5 : 1,
-                  getDrawingHorizontalLine: (value) {
-                    return FlLine(
-                      color: gridColor,
-                      strokeWidth: 1,
-                      dashArray: [5, 5], // Dotted lines
-                    );
-                  },
-                ),
-                titlesData: FlTitlesData(
-                  show: true,
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 50, // More space for two-line labels
-                      interval: dailyData.length > 10
-                          ? (dailyData.length / 5).ceil().toDouble()
-                          : 1,
-                      getTitlesWidget: (value, meta) {
-                        final int index = value.toInt();
-                        if (index < 0 || index >= dailyData.length) {
-                          return const SizedBox();
-                        }
-
-                        final date = dailyData[index].date;
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                DateFormat('MMM d').format(date),
-                                style: TextStyle(
-                                  color: subtitleColor,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              // Add day of week for better context
-                              Text(
-                                DateFormat('E').format(
-                                    date), // Day of week (e.g., Mon, Tue)
-                                style: TextStyle(
-                                  color: subtitleColor.withOpacity(0.8),
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    axisNameWidget: Text(
-                      'Daily Customers',
-                      style: TextStyle(
-                        color: subtitleColor,
-                        fontSize: 12,
-                      ),
-                    ),
-                    axisNameSize: 25,
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 40,
-                      interval: maxCount > 10 ? maxCount / 5 : 1,
-                      getTitlesWidget: (value, meta) {
-                        if (value == 0) return const SizedBox();
-                        if (value % 1 == 0 || maxCount > 20) {
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 4),
-                            child: Text(
-                              value.toInt().toString(),
-                              style: TextStyle(
-                                color: subtitleColor,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          );
-                        }
-                        return const SizedBox();
-                      },
-                    ),
-                  ),
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                ),
-                borderData: FlBorderData(
-                  show: true,
-                  border: Border(
-                    bottom: BorderSide(color: borderColor, width: 1),
-                    left: BorderSide(color: borderColor, width: 1),
-                  ),
-                ),
-                minX: 0,
-                maxX: (dailyData.length - 1).toDouble(),
-                minY: 0,
-                maxY: dailyData.isEmpty
-                    ? 10
-                    : (dailyData.map((e) => e.count).reduce(max) * 1.2)
-                        .toDouble(), // Add some space at the top
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: List.generate(dailyData.length, (index) {
-                      return FlSpot(
-                        index.toDouble(),
-                        dailyData[index].count.toDouble(),
-                      );
-                    }),
-                    isCurved: true,
-                    curveSmoothness: 0.3,
-                    color: lineColor,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
-                    dotData: FlDotData(
-                      show: true,
-                      getDotPainter: (spot, percent, barData, index) {
-                        return FlDotCirclePainter(
-                          radius: 4,
-                          color: dotColor,
-                          strokeWidth: 2,
-                          strokeColor: backgroundColor,
-                        );
-                      },
-                      checkToShowDot: (spot, barData) {
-                        // Show dots at regular intervals or for important points
-                        return dailyData.length <= 10 ||
-                            spot.x.toInt() % ((dailyData.length / 5).ceil()) ==
-                                0 ||
-                            spot.x.toInt() == dailyData.length - 1;
-                      },
-                    ),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: gradientColor,
-                      gradient: LinearGradient(
-                        colors: [
-                          gradientColor,
-                          gradientColor.withOpacity(0.1),
-                        ],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            child: _buildLineChart(
+                dailyData,
+                maxCount,
+                theme,
+                lineColor,
+                gradientColor,
+                dotColor,
+                backgroundColor,
+                subtitleColor,
+                gridColor,
+                borderColor),
           ),
         ],
       ),

@@ -144,6 +144,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
   // Available roles for dropdown
   final List<String> _availableRoles = ['User', 'Admin'];
 
+  // For chart expand functionality
+  bool _isChartExpanded = false;
+
   // Validation functions
   String? _validatePhoneNumber(String? value) {
     if (value == null || value.isEmpty) {
@@ -2341,6 +2344,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
       startDate: _startDate,
       endDate: _endDate,
       onDateRangePressed: () => _selectDateRange(context),
+      isExpanded: _isChartExpanded,
+      onExpandPressed: () {
+        setState(() {
+          _isChartExpanded = !_isChartExpanded;
+        });
+      },
     );
   }
 
@@ -2375,71 +2384,86 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
                         ),
                       ),
                     )
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 40.0,
-                        horizontal: 24.0,
-                      ),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            maxWidth: 1200, // Maximum width for large screens
+                  : _isChartExpanded
+                      ? // Expanded chart view
+                      Container(
+                          width: double.infinity,
+                          height: double.infinity,
+                          color: backgroundColor,
+                          child: SafeArea(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: _buildDueDateLineChart(),
+                            ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: <Widget>[
-                              // Hero section with text animation
-                              _buildHeroSection(context),
-
-                              const SizedBox(height: 30),
-
-                              // Summary Cards
-                              _buildSummaryCards(context),
-
-                              const SizedBox(height: 30),
-
-                              // Charts side by side
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  // Responsive layout based on available width
-                                  if (constraints.maxWidth > 800) {
-                                    // Wide layout - charts in a row
-                                    return Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: <Widget>[
-                                        // Insurer Pie Chart
-                                        Expanded(
-                                          child: _buildInsurerPieChart(),
-                                        ),
-                                        const SizedBox(width: 24),
-                                        // Due Date Line Chart
-                                        Expanded(
-                                          child: _buildDueDateLineChart(),
-                                        ),
-                                      ],
-                                    );
-                                  } else {
-                                    // Narrow layout - charts stacked vertically
-                                    return Column(
-                                      children: <Widget>[
-                                        // Insurer Pie Chart
-                                        _buildInsurerPieChart(),
-                                        const SizedBox(height: 24),
-                                        // Due Date Line Chart
-                                        _buildDueDateLineChart(),
-                                      ],
-                                    );
-                                  }
-                                },
+                        )
+                      : // Normal dashboard view
+                      SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 40.0,
+                            horizontal: 24.0,
+                          ),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                maxWidth:
+                                    1200, // Maximum width for large screens
                               ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: <Widget>[
+                                  // Hero section with text animation
+                                  _buildHeroSection(context),
 
-                              const SizedBox(height: 30),
-                            ],
+                                  const SizedBox(height: 30),
+
+                                  // Summary Cards
+                                  _buildSummaryCards(context),
+
+                                  const SizedBox(height: 30),
+
+                                  // Charts side by side
+                                  LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      // Responsive layout based on available width
+                                      if (constraints.maxWidth > 800) {
+                                        // Wide layout - charts in a row
+                                        return Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: <Widget>[
+                                            // Insurer Pie Chart
+                                            Expanded(
+                                              child: _buildInsurerPieChart(),
+                                            ),
+                                            const SizedBox(width: 24),
+                                            // Due Date Line Chart
+                                            Expanded(
+                                              child: _buildDueDateLineChart(),
+                                            ),
+                                          ],
+                                        );
+                                      } else {
+                                        // Narrow layout - charts stacked vertically
+                                        return Column(
+                                          children: <Widget>[
+                                            // Insurer Pie Chart
+                                            _buildInsurerPieChart(),
+                                            const SizedBox(height: 24),
+                                            // Due Date Line Chart
+                                            _buildDueDateLineChart(),
+                                          ],
+                                        );
+                                      }
+                                    },
+                                  ),
+
+                                  const SizedBox(height: 30),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
       floatingActionButton: AnimatedBuilder(
         animation: _animationController,
         builder: (context, child) {
