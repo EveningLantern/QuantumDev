@@ -233,13 +233,13 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
   // --- Column Resizing State Variables ---
   Map<String, double> _columnWidths = {
-    colId: 80.0,
-    colName: 150.0,
-    colDueDate: 120.0,
-    colVehicleNumber: 120.0,
-    colContactNumber: 120.0,
-    colModel: 120.0,
-    colInsurer: 120.0,
+    colId: 60.0,
+    colName: 140.0,
+    colDueDate: 100.0,
+    colVehicleNumber: 110.0,
+    colContactNumber: 110.0,
+    colModel: 100.0,
+    colInsurer: 100.0,
   };
   String? _resizingColumn;
   double _startX = 0.0;
@@ -3166,11 +3166,11 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
             ),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              width: double.infinity,
-              height: double.infinity,
+              constraints: BoxConstraints
+                  .expand(), // Use constraints instead of width/height
               alignment: Alignment.centerLeft,
               padding:
-                  const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                  const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
               transform: (isHovered && !isSelected)
                   ? (Matrix4.identity()..scale(1.02))
                   : Matrix4.identity(),
@@ -3215,6 +3215,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
           ),
         ),
       ),
+      showEditIcon: false, // Remove edit icon to save space
     );
   }
 
@@ -4225,7 +4226,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
               children: [
                 if (_sortColumnKey == columnKey)
                   Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
+                    padding: const EdgeInsets.only(right: 4.0),
                     child: Icon(
                       _sortAscending
                           ? Icons.keyboard_arrow_up
@@ -4269,9 +4270,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                   if (_resizingColumn == columnKey) {
                     final dx = details.globalPosition.dx - _startX;
                     setState(() {
-                      // Ensure minimum width of 50 pixels
+                      // Ensure minimum width of 40 pixels for more compact layout
                       _columnWidths[columnKey] =
-                          (_startWidth + dx).clamp(50.0, 500.0);
+                          (_startWidth + dx).clamp(40.0, 500.0);
                     });
                   }
                 },
@@ -4719,79 +4720,90 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                               scrollDirection: Axis.vertical,
                               child: SingleChildScrollView(
                                 scrollDirection: Axis.horizontal,
-                                child: DataTable(
-                                  headingRowColor:
-                                      MaterialStateProperty.resolveWith<Color?>(
-                                          (Set<MaterialState> states) {
-                                    return Theme.of(context)
-                                        .appBarTheme
-                                        .backgroundColor; // Match app bar color
-                                  }),
-                                  dataRowColor:
-                                      MaterialStateProperty.resolveWith<Color?>(
-                                          (Set<MaterialState> states) {
-                                    return Theme.of(context)
-                                        .appBarTheme
-                                        .backgroundColor
-                                        ?.withOpacity(
-                                            0.8); // Slightly transparent app bar color
-                                  }),
-                                  border: TableBorder.all(
-                                      color: Theme.of(context).primaryColor,
-                                      width: 1),
-                                  columnSpacing:
-                                      0, // We'll handle spacing with column widths
-                                  sortColumnIndex: _sortColumnKey == null
-                                      ? null
-                                      : [
-                                          colId,
-                                          colName,
-                                          colDueDate,
-                                          colVehicleNumber,
-                                          colContactNumber,
-                                          colModel,
-                                          colInsurer
-                                        ].indexOf(_sortColumnKey!),
-                                  sortAscending: _sortAscending,
-                                  columns: [
-                                    _buildInteractiveDataColumn('ID', colId),
-                                    _buildInteractiveDataColumn(
-                                        'Name', colName),
-                                    _buildInteractiveDataColumn(
-                                        'Due Date', colDueDate),
-                                    _buildInteractiveDataColumn(
-                                        'Vehicle No.', colVehicleNumber),
-                                    _buildInteractiveDataColumn(
-                                        'Contact No.', colContactNumber),
-                                    _buildInteractiveDataColumn(
-                                        'Model', colModel),
-                                    _buildInteractiveDataColumn(
-                                        'Insurer', colInsurer),
-                                  ],
-                                  rows: _displayedCustomers.map((customer) {
-                                    return DataRow(
-                                      cells: [
-                                        _buildStyledCell(
-                                            customer.id, colId, customer.id),
-                                        _buildStyledCell(customer.id, colName,
-                                            customer.name),
-                                        _buildStyledCell(customer.id,
-                                            colDueDate, customer.dueDate),
-                                        _buildStyledCell(
-                                            customer.id,
+                                child: Container(
+                                  margin: EdgeInsets.zero,
+                                  padding: EdgeInsets.zero,
+                                  child: DataTable(
+                                    headingRowColor: MaterialStateProperty
+                                        .resolveWith<Color?>(
+                                            (Set<MaterialState> states) {
+                                      return Theme.of(context)
+                                          .appBarTheme
+                                          .backgroundColor; // Match app bar color
+                                    }),
+                                    dataRowColor: MaterialStateProperty
+                                        .resolveWith<Color?>(
+                                            (Set<MaterialState> states) {
+                                      return Theme.of(context)
+                                          .appBarTheme
+                                          .backgroundColor
+                                          ?.withOpacity(
+                                              0.8); // Slightly transparent app bar color
+                                    }),
+                                    border: TableBorder.all(
+                                        color: Theme.of(context).primaryColor,
+                                        width: 1),
+                                    columnSpacing:
+                                        0, // No spacing between columns
+                                    horizontalMargin:
+                                        0, // Remove horizontal margins
+                                    headingRowHeight:
+                                        40, // Compact header height
+                                    dataRowHeight: 35, // Compact row height
+                                    dividerThickness:
+                                        0, // Remove divider lines for tighter fit
+                                    sortColumnIndex: _sortColumnKey == null
+                                        ? null
+                                        : [
+                                            colId,
+                                            colName,
+                                            colDueDate,
                                             colVehicleNumber,
-                                            customer.vehicleNumber),
-                                        _buildStyledCell(
-                                            customer.id,
                                             colContactNumber,
-                                            customer.contactNumber),
-                                        _buildStyledCell(customer.id, colModel,
-                                            customer.model),
-                                        _buildStyledCell(customer.id,
-                                            colInsurer, customer.insurer),
-                                      ],
-                                    );
-                                  }).toList(),
+                                            colModel,
+                                            colInsurer
+                                          ].indexOf(_sortColumnKey!),
+                                    sortAscending: _sortAscending,
+                                    columns: [
+                                      _buildInteractiveDataColumn('ID', colId),
+                                      _buildInteractiveDataColumn(
+                                          'Name', colName),
+                                      _buildInteractiveDataColumn(
+                                          'Due Date', colDueDate),
+                                      _buildInteractiveDataColumn(
+                                          'Vehicle No.', colVehicleNumber),
+                                      _buildInteractiveDataColumn(
+                                          'Contact No.', colContactNumber),
+                                      _buildInteractiveDataColumn(
+                                          'Model', colModel),
+                                      _buildInteractiveDataColumn(
+                                          'Insurer', colInsurer),
+                                    ],
+                                    rows: _displayedCustomers.map((customer) {
+                                      return DataRow(
+                                        cells: [
+                                          _buildStyledCell(
+                                              customer.id, colId, customer.id),
+                                          _buildStyledCell(customer.id, colName,
+                                              customer.name),
+                                          _buildStyledCell(customer.id,
+                                              colDueDate, customer.dueDate),
+                                          _buildStyledCell(
+                                              customer.id,
+                                              colVehicleNumber,
+                                              customer.vehicleNumber),
+                                          _buildStyledCell(
+                                              customer.id,
+                                              colContactNumber,
+                                              customer.contactNumber),
+                                          _buildStyledCell(customer.id,
+                                              colModel, customer.model),
+                                          _buildStyledCell(customer.id,
+                                              colInsurer, customer.insurer),
+                                        ],
+                                      );
+                                    }).toList(),
+                                  ),
                                 ),
                               ),
                             ),
