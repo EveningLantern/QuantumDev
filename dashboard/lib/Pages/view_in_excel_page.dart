@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // For clipboard functionality
 import 'dart:convert'; // For JSON decoding/encoding
 import 'dart:io'; // For file operations
 import 'dart:math'; // For mathematical functions like exp
+import 'dart:async'; // For Timer functionality
 import 'package:http/http.dart' as http; // HTTP package
 import 'package:intl/intl.dart'; // For date formatting in filter dialog
 import 'package:shared_preferences/shared_preferences.dart'; // For local persistence
@@ -202,10 +203,20 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
       Colors.grey[900]!; // Color for the function result text
   bool _showFunctionResult = false; // Controls visibility of the result panel
 
+  // --- Auto-Update Function Variables ---
+  String?
+      _activeFunctionType; // Tracks which function is currently active ('TODAY', 'NETWORKDAYS', 'COUNTIF')
+  Map<String, dynamic> _activeFunctionParams =
+      {}; // Stores parameters for active function
+
   // --- Search and Filter State Variables ---
   String _searchQuery = '';
   String _selectedSearchFilter = 'All';
   bool _isSearchVisible = false;
+
+  // --- Clipboard Cache for Performance ---
+  String? _lastCopiedValue;
+  String? _lastCopiedCellKey;
 
   // --- Inline Editing State Variables ---
   String? _editingCellKey;
@@ -234,6 +245,9 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   double _startX = 0.0;
   double _startWidth = 0.0;
 
+  // --- Auto-deselect Timer ---
+  Timer? _autoDeselectTimer;
+
   @override
   void initState() {
     super.initState();
@@ -259,6 +273,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     _insurerController.dispose();
     _cellEditController.dispose();
     _cellEditFocusNode.dispose();
+    _autoDeselectTimer?.cancel(); // Cancel auto-deselect timer
     _saveCellStyles(); // Save styles on dispose
     super.dispose();
   }
@@ -287,60 +302,124 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     return '${customerId}_$columnName';
   }
 
+  // --- Auto-deselect Timer Management ---
+  void _startAutoDeselectTimer() {
+    _autoDeselectTimer?.cancel(); // Cancel any existing timer
+    _autoDeselectTimer = Timer(const Duration(seconds: 45), () {
+      if (mounted && _selectedCellKey != null) {
+        setState(() {
+          _selectedCellKey = null;
+          _currentFontFamily = 'Arial'; // Reset to default
+        });
+        _showQuickMessage(
+            'Cell automatically deselected after 45 seconds', Colors.grey);
+      }
+    });
+  }
+
+  void _cancelAutoDeselectTimer() {
+    _autoDeselectTimer?.cancel();
+    _autoDeselectTimer = null;
+  }
+
+  void _deselectCell() {
+    setState(() {
+      _selectedCellKey = null;
+      _currentFontFamily = 'Arial'; // Reset to default when no cell is selected
+    });
+    _cancelAutoDeselectTimer();
+  }
+
   void _handleCellTap(String cellKey) {
     setState(() {
       if (_selectedCellKey == cellKey) {
         _selectedCellKey = null; // Deselect if tapped again
         _currentFontFamily =
             'Arial'; // Reset to default when no cell is selected
+        _cancelAutoDeselectTimer(); // Cancel timer when manually deselected
       } else {
         _selectedCellKey = cellKey;
         // Update current font family to match the selected cell's font family
         final cellStyle = _cellStyles[cellKey] ?? CellStyle();
         _currentFontFamily = cellStyle.fontFamily;
+        _startAutoDeselectTimer(); // Start 45-second timer
       }
+
+      // Auto-update active function when cell selection changes
+      _autoUpdateActiveFunction();
     });
   }
 
-  // Copy and Paste functionality
-  Future<void> _copyCellValue() async {
-    if (_selectedCellKey == null) return;
+  // Auto-update the active function when cell selection changes
+  void _autoUpdateActiveFunction() {
+    if (_activeFunctionType == null) return;
 
-    // Get the cell value
-    String cellValue = _getCellValueForKey(_selectedCellKey!);
-
-    // Copy to clipboard
-    await Clipboard.setData(ClipboardData(text: cellValue));
-
-    // Show feedback to user
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.copy, color: Colors.white, size: 16),
-              const SizedBox(width: 8),
-              Text('Copied: "$cellValue"'),
-            ],
-          ),
-          duration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
+    switch (_activeFunctionType) {
+      case 'TODAY':
+        if (_selectedCellKey != null) _calculateTodayFunction();
+        break;
+      case 'NETWORKDAYS':
+        if (_selectedCellKey != null) _calculateNetworkdaysFunction();
+        break;
+      case 'COUNTIF':
+        _calculateCountIfFunction(); // Count If doesn't depend on cell selection
+        break;
     }
   }
 
-  Future<void> _pasteCellValue() async {
-    if (_selectedCellKey == null) return;
+  // Clear the active function to stop auto-updates
+  void _clearActiveFunction() {
+    setState(() {
+      _activeFunctionType = null;
+      _activeFunctionParams = {};
+      _showFunctionResult = false;
+      _functionResult = null;
+    });
+  }
+
+  // Optimized Copy and Paste functionality
+  void _copyCellValue() {
+    if (_selectedCellKey == null) {
+      _showQuickMessage('No cell selected', Colors.orange);
+      return;
+    }
+
+    try {
+      // Get the cell value
+      String cellValue = _getCellValueForKey(_selectedCellKey!);
+
+      // Cache the copied value for faster repeated operations
+      _lastCopiedValue = cellValue;
+      _lastCopiedCellKey = _selectedCellKey;
+
+      // Copy to clipboard synchronously for better performance
+      Clipboard.setData(ClipboardData(text: cellValue));
+
+      // Show quick feedback with truncated text for long values
+      String displayValue = cellValue.length > 30
+          ? '${cellValue.substring(0, 30)}...'
+          : cellValue;
+      _showQuickMessage('Copied: "$displayValue"', Colors.green);
+    } catch (e) {
+      _showQuickMessage('Copy failed', Colors.red);
+    }
+  }
+
+  void _pasteCellValue() async {
+    if (_selectedCellKey == null) {
+      _showQuickMessage('No cell selected', Colors.orange);
+      return;
+    }
 
     try {
       // Get clipboard data
       ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
-      if (data?.text == null) return;
+      if (data?.text == null || data!.text!.isEmpty) {
+        _showQuickMessage('Clipboard is empty', Colors.orange);
+        return;
+      }
 
-      String clipboardText = data!.text!;
+      String clipboardText = data.text!.trim();
 
       // Parse the cell key to get customer ID and column name
       List<String> parts = _selectedCellKey!.split('_');
@@ -351,70 +430,70 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
       // Don't allow pasting into ID column
       if (columnName == colId) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.warning, color: Colors.white, size: 16),
-                SizedBox(width: 8),
-                Text('Cannot paste into ID column'),
-              ],
-            ),
-            duration: const Duration(seconds: 2),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
+        _showQuickMessage('Cannot paste into ID column', Colors.orange);
         return;
+      }
+
+      // Validate contact number if pasting into contact number field
+      if (columnName == colContactNumber) {
+        if (!_isValidPhoneNumber(clipboardText)) {
+          _showQuickMessage(
+              'Invalid phone number - must be 10 digits', Colors.red);
+          return;
+        }
       }
 
       // Save current state for undo
       _saveStateForUndo();
 
-      // Update the cell value
+      // Update the cell value immediately for better UX
       _updateCellValue(_selectedCellKey!, clipboardText);
 
-      // Update the customer data in the backend
-      await _updateCustomerField(customerId, columnName, clipboardText);
+      // Show immediate feedback
+      _showQuickMessage('Pasted: "$clipboardText"', Colors.blue);
 
-      // Show feedback to user
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.paste, color: Colors.white, size: 16),
-                const SizedBox(width: 8),
-                Text('Pasted: "$clipboardText"'),
-              ],
-            ),
-            duration: const Duration(seconds: 2),
-            backgroundColor: Colors.blue,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
-      }
+      // Update the customer data in the backend asynchronously
+      _updateCustomerField(customerId, columnName, clipboardText)
+          .catchError((e) {
+        // Revert on error
+        _fetchDataFromServer();
+        _showQuickMessage('Paste failed: Backend error', Colors.red);
+      });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.error, color: Colors.white, size: 16),
-              const SizedBox(width: 8),
-              Text('Paste failed: $e'),
-            ],
-          ),
-          duration: const Duration(seconds: 3),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
+      _showQuickMessage('Paste failed', Colors.red);
     }
+  }
+
+  // Helper method for quick messages
+  void _showQuickMessage(String message, Color color) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+                color == Colors.red
+                    ? Icons.error
+                    : color == Colors.orange
+                        ? Icons.warning
+                        : color == Colors.green
+                            ? Icons.check_circle
+                            : Icons.info,
+                color: Colors.white,
+                size: 16),
+            const SizedBox(width: 8),
+            Flexible(child: Text(message)),
+          ],
+        ),
+        duration: const Duration(milliseconds: 1500),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.only(bottom: 80, left: 20, right: 20),
+      ),
+    );
   }
 
   String _getCellValueForKey(String cellKey) {
@@ -1299,6 +1378,17 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   }
 
   void _insertToday() {
+    // Set this as the active function
+    setState(() {
+      _activeFunctionType = 'TODAY';
+      _activeFunctionParams = {};
+    });
+
+    // Calculate the result
+    _calculateTodayFunction();
+  }
+
+  void _calculateTodayFunction() {
     if (_selectedCellKey == null) {
       setState(() {
         _functionResult = 'Please select a cell with a date value first';
@@ -1362,20 +1452,29 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     // Calculate the difference in days
     int differenceInDays = selectedDate.difference(today).inDays;
 
+    // Format dates for display
+    String todayFormatted =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    String selectedDateFormatted =
+        '${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}';
+
     String resultMessage;
     Color resultColor;
 
     if (differenceInDays < 0) {
-      resultMessage = 'Due date passed by ${-differenceInDays} days';
+      resultMessage =
+          'From $todayFormatted to $selectedDateFormatted ${-differenceInDays} days are due';
       resultColor = Colors.red[700]!; // Red for overdue
     } else if (differenceInDays == 0) {
-      resultMessage = 'Due date is today';
+      resultMessage = 'Due date is today ($todayFormatted)';
       resultColor = Colors.orange[700]!; // Orange for due today
     } else if (differenceInDays <= 7) {
-      resultMessage = '${differenceInDays} days left for the due date';
+      resultMessage =
+          'From $todayFormatted to $selectedDateFormatted ${differenceInDays} days are left';
       resultColor = Colors.amber[700]!; // Amber for due soon (within a week)
     } else {
-      resultMessage = '${differenceInDays} days left for the due date';
+      resultMessage =
+          'From $todayFormatted to $selectedDateFormatted ${differenceInDays} days are left';
       resultColor = Colors.green[700]!; // Green for plenty of time
     }
 
@@ -1705,6 +1804,17 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   }
 
   void _insertNetworkdays() {
+    // Set this as the active function
+    setState(() {
+      _activeFunctionType = 'NETWORKDAYS';
+      _activeFunctionParams = {};
+    });
+
+    // Calculate the result
+    _calculateNetworkdaysFunction();
+  }
+
+  void _calculateNetworkdaysFunction() {
     if (_selectedCellKey == null) {
       setState(() {
         _functionResult = 'Please select a cell with a date value first';
@@ -2703,6 +2813,16 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
 
   // Count If function implementation
   void _insertCountIf() {
+    // Set this as the active function
+    setState(() {
+      _activeFunctionType = 'COUNTIF';
+      _activeFunctionParams = {};
+    });
+
+    _showCountIfDialog();
+  }
+
+  void _showCountIfDialog() {
     // Define the fields that can be selected
     final List<String> fields = ['Name', 'Due Date', 'Insurer', 'Model'];
     String selectedField = fields[0]; // Default to Name
@@ -2868,6 +2988,8 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
+                            color: Colors
+                                .black, // Fixed color unaffected by theme changes
                           ),
                         ),
                       ],
@@ -2885,59 +3007,17 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                 ElevatedButton(
                   child: const Text('Show Result'),
                   onPressed: () {
-                    // Make sure we have the latest count
-                    countOccurrences();
-
-                    // Prepare the result message
-                    String resultMessage =
-                        'COUNT IF: Found $count occurrences where $selectedField contains "${valueController.text}"\n\n';
-
-                    // Add details of matching records if count is not too large
-                    if (count > 0 && count <= 10) {
-                      resultMessage += 'Matching records:\n';
-                      int index = 1;
-
-                      for (var customer in _customers) {
-                        String fieldValue = '';
-
-                        // Get the appropriate field value based on selection
-                        switch (selectedField) {
-                          case 'Name':
-                            fieldValue = customer.name;
-                            break;
-                          case 'Due Date':
-                            fieldValue = customer.dueDate;
-                            break;
-                          case 'Insurer':
-                            fieldValue = customer.insurer;
-                            break;
-                          case 'Model':
-                            fieldValue = customer.model;
-                            break;
-                        }
-
-                        // Add matching record details
-                        if (fieldValue.toLowerCase().contains(
-                            valueController.text.trim().toLowerCase())) {
-                          resultMessage +=
-                              '$index. ${customer.name} (${customer.vehicleNumber})\n';
-                          index++;
-                        }
-                      }
-                    } else if (count > 10) {
-                      resultMessage +=
-                          'Too many matches to display individually.';
-                    }
+                    // Store the parameters for auto-update
+                    _activeFunctionParams = {
+                      'field': selectedField,
+                      'searchValue': valueController.text,
+                    };
 
                     // Close the dialog
                     Navigator.of(context).pop();
 
-                    // Update the UI outside of the dialog
-                    this.setState(() {
-                      _functionResult = resultMessage;
-                      _functionResultColor = Colors.teal[700]!;
-                      _showFunctionResult = true;
-                    });
+                    // Calculate and show the result
+                    _calculateCountIfFunction();
                   },
                 ),
               ],
@@ -2946,6 +3026,89 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
         );
       },
     );
+  }
+
+  void _calculateCountIfFunction() {
+    if (_activeFunctionParams.isEmpty) return;
+
+    String selectedField = _activeFunctionParams['field'] ?? '';
+    String searchValue = _activeFunctionParams['searchValue'] ?? '';
+
+    if (selectedField.isEmpty || searchValue.isEmpty) return;
+
+    int count = 0;
+    String searchValueLower = searchValue.trim().toLowerCase();
+
+    for (var customer in _customers) {
+      String fieldValue = '';
+
+      // Get the appropriate field value based on selection
+      switch (selectedField) {
+        case 'Name':
+          fieldValue = customer.name;
+          break;
+        case 'Due Date':
+          fieldValue = customer.dueDate;
+          break;
+        case 'Insurer':
+          fieldValue = customer.insurer;
+          break;
+        case 'Model':
+          fieldValue = customer.model;
+          break;
+      }
+
+      // Count if the field contains the search value (case insensitive)
+      if (fieldValue.toLowerCase().contains(searchValueLower)) {
+        count++;
+      }
+    }
+
+    // Prepare the result message
+    String resultMessage =
+        'COUNT IF: Found $count occurrences where $selectedField contains "$searchValue"\n\n';
+
+    // Add details of matching records if count is not too large
+    if (count > 0 && count <= 10) {
+      resultMessage += 'Matching records:\n';
+      int index = 1;
+
+      for (var customer in _customers) {
+        String fieldValue = '';
+
+        // Get the appropriate field value based on selection
+        switch (selectedField) {
+          case 'Name':
+            fieldValue = customer.name;
+            break;
+          case 'Due Date':
+            fieldValue = customer.dueDate;
+            break;
+          case 'Insurer':
+            fieldValue = customer.insurer;
+            break;
+          case 'Model':
+            fieldValue = customer.model;
+            break;
+        }
+
+        // Add matching record details
+        if (fieldValue.toLowerCase().contains(searchValueLower)) {
+          resultMessage +=
+              '$index. ${customer.name} (${customer.vehicleNumber})\n';
+          index++;
+        }
+      }
+    } else if (count > 10) {
+      resultMessage += 'Too many matches to display individually.';
+    }
+
+    // Update the UI
+    setState(() {
+      _functionResult = resultMessage;
+      _functionResultColor = Colors.teal[700]!;
+      _showFunctionResult = true;
+    });
   }
 
   void _setCellValue(String cellKey, String value) {
@@ -3468,9 +3631,15 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                           labelText: 'Contact Number',
                           icon: Icon(Icons.phone_outlined)),
                       keyboardType: TextInputType.phone,
-                      validator: (value) => value!.isEmpty
-                          ? 'Please enter contact number'
-                          : null),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter contact number';
+                        }
+                        if (!_isValidPhoneNumber(value)) {
+                          return 'Phone number should be exactly 10 digits';
+                        }
+                        return null;
+                      }),
                   TextFormField(
                       controller: _modelController,
                       decoration: InputDecoration(
@@ -3604,8 +3773,61 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     }
   }
 
+  // Validation function for phone numbers
+  bool _isValidPhoneNumber(String phoneNumber) {
+    // Remove any spaces, dashes, or other non-digit characters
+    String cleanedNumber = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+    // Check if it's exactly 10 digits
+    return cleanedNumber.length == 10 &&
+        RegExp(r'^[0-9]+$').hasMatch(cleanedNumber);
+  }
+
   Future<void> _saveCellEdit(String customerId, String columnKey) async {
     final newValue = _cellEditController.text.trim();
+
+    // Validate contact number if editing contact number field
+    if (columnKey == colContactNumber) {
+      if (!_isValidPhoneNumber(newValue)) {
+        // Show error message and don't save
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Invalid Phone Number',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        'Phone number should be exactly 10 digits',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+        // Keep the cell in editing mode, don't clear it
+        return;
+      }
+    }
 
     // Find the customer to update
     final customerIndex = _customers.indexWhere((c) => c.id == customerId);
@@ -4130,386 +4352,453 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     final currentStyle = _getCurrentCellStyle();
     return Shortcuts(
         shortcuts: <LogicalKeySet, Intent>{
+          // Copy and Paste shortcuts
           LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyC):
               const CopyIntent(),
           LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyV):
+              const PasteIntent(),
+          // Alternative shortcuts for different keyboards
+          LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.insert):
+              const CopyIntent(),
+          LogicalKeySet(LogicalKeyboardKey.shift, LogicalKeyboardKey.insert):
               const PasteIntent(),
         },
         child: Actions(
           actions: <Type, Action<Intent>>{
             CopyIntent: CallbackAction<CopyIntent>(
-              onInvoke: (CopyIntent intent) => _copyCellValue(),
+              onInvoke: (CopyIntent intent) {
+                _copyCellValue();
+                return null;
+              },
             ),
             PasteIntent: CallbackAction<PasteIntent>(
-              onInvoke: (PasteIntent intent) => _pasteCellValue(),
+              onInvoke: (PasteIntent intent) {
+                _pasteCellValue();
+                return null;
+              },
             ),
           },
           child: Focus(
             autofocus: true,
+            canRequestFocus: true,
             child: Scaffold(
               backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-              body: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+              bottomNavigationBar: Container(
+                height: 30,
+                color: Colors.grey[100],
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
                   children: [
-                    const SizedBox(height: 20),
-                    // Search Bar (conditionally visible)
-                    if (_isSearchVisible) ...[
-                      SearchFilter(
-                        onSearchChanged: _onSearchChanged,
-                        onClearSearch: _onClearSearch,
-                        searchQuery: _searchQuery,
-                        onFilterChanged: _onFilterChanged,
-                        selectedFilter: _selectedSearchFilter,
+                    // Selection info
+                    if (_selectedCellKey != null) ...[
+                      Icon(Icons.touch_app, size: 16, color: Colors.blue[700]),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Selected: ${_selectedCellKey!.split('_')[1]}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(width: 16),
                     ],
-                    // Always display FormattingToolbar
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10.0),
-                      child: FormattingToolbar(
-                        isBoldActive: currentStyle.isBold,
-                        isUnderlineActive: currentStyle.isUnderline,
-                        isItalicActive: currentStyle.isItalic,
-                        isStrikethroughActive: currentStyle.isStrikethrough,
-                        onToggleBold: _toggleBold,
-                        onToggleUnderline: _toggleUnderline,
-                        onToggleItalic: _toggleItalic,
-                        onToggleStrikethrough: _toggleStrikethrough,
-                        onPickTextColor: _pickTextColor,
-                        onImportExcel: _importExcel,
-                        onExportExcel: _exportExcel,
-                        onChangeFontStyle: _changeFontStyle,
-                        onInsertToday: _insertToday,
-                        onInsertEdate: _insertEdate,
-                        onInsertNetworkdays: _insertNetworkdays,
-                        onInsertMin: _insertMin,
-                        onInsertMax: _insertMax,
-                        onDeleteRecord:
-                            _deleteRecord, // Add delete record functionality
-                        onInsertCountIf:
-                            _insertCountIf, // Add Count If functionality
-                        currentFontFamily: _currentFontFamily,
-                        isEnabled: _selectedCellKey != null,
-                        onInsertSigmoid: _insertSigmoid,
-                        onInsertIntegration: _insertIntegration,
-                        onUndo: _undo,
-                        onRedo: _redo,
-                      ),
+                    // Keyboard shortcuts info
+                    Text(
+                      'Ctrl+C: Copy | Ctrl+V: Paste | Double-click: Edit',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                     ),
-
-                    // Function Result Display
-                    if (_showFunctionResult && _functionResult != null)
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16.0),
-                        margin: const EdgeInsets.only(bottom: 10.0),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8.0),
-                          border: Border.all(
-                              color: _functionResultColor.withOpacity(0.5),
-                              width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _functionResultColor.withOpacity(0.1),
-                              blurRadius: 8,
-                              spreadRadius: 1,
-                            )
-                          ],
+                    const Spacer(),
+                    // Record count
+                    Text(
+                      '${_displayedCustomers.length} of ${_customers.length} records',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
+              body: GestureDetector(
+                onTap: () {
+                  // Deselect cell when clicking outside the table
+                  if (_selectedCellKey != null) {
+                    _deselectCell();
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 20),
+                      // Search Bar (conditionally visible)
+                      if (_isSearchVisible) ...[
+                        SearchFilter(
+                          onSearchChanged: _onSearchChanged,
+                          onClearSearch: _onClearSearch,
+                          searchQuery: _searchQuery,
+                          onFilterChanged: _onFilterChanged,
+                          selectedFilter: _selectedSearchFilter,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Function Result:',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.grey[800],
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.close, size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () {
-                                    setState(() {
-                                      _showFunctionResult = false;
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Builder(
-                              builder: (context) {
-                                // Check if the result contains a calendar visualization
-                                bool hasCalendarView =
-                                    _functionResult!.contains('\n\n');
-
-                                if (hasCalendarView) {
-                                  // Split the message and the calendar view
-                                  List<String> parts =
-                                      _functionResult!.split('\n\n');
-                                  String message = parts[0];
-                                  String calendarView =
-                                      parts.length > 1 ? parts[1] : '';
-
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // Main message with icon
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Icon(
-                                            message.contains('passed')
-                                                ? Icons.warning_amber_rounded
-                                                : message.contains('today')
-                                                    ? Icons.today_rounded
-                                                    : message.contains('left')
-                                                        ? Icons
-                                                            .event_available_rounded
-                                                        : Icons
-                                                            .info_outline_rounded,
-                                            color: _functionResultColor,
-                                            size: 24,
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Flexible(
-                                            child: Text(
-                                              message,
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                                color: _functionResultColor,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-
-                                      // Calendar visualization
-                                      if (calendarView.isNotEmpty)
-                                        Container(
-                                          margin:
-                                              const EdgeInsets.only(top: 16),
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey[50],
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            border: Border.all(
-                                                color: Colors.grey[300]!),
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Working Days Calendar:',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 14,
-                                                  color: Colors.grey[800],
-                                                ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              Text(
-                                                calendarView,
-                                                style: TextStyle(
-                                                  fontFamily: 'monospace',
-                                                  fontSize: 13,
-                                                  height: 1.4,
-                                                  color: Colors.grey[800],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                    ],
-                                  );
-                                } else {
-                                  // Regular message with icon (no calendar)
-                                  return Row(
-                                    children: [
-                                      Icon(
-                                        _functionResult!.contains('passed by')
-                                            ? Icons.warning_amber_rounded
-                                            : _functionResult!.contains('today')
-                                                ? Icons.today_rounded
-                                                : _functionResult!
-                                                        .contains('days left')
-                                                    ? Icons
-                                                        .event_available_rounded
-                                                    : Icons
-                                                        .info_outline_rounded,
-                                        color: _functionResultColor,
-                                        size: 24,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Flexible(
-                                        child: Text(
-                                          _functionResult!,
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: _functionResultColor,
-                                          ),
-                                          softWrap: true,
-                                          overflow: TextOverflow.visible,
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                }
-                              },
-                            ),
-                          ],
+                        const SizedBox(height: 10),
+                      ],
+                      // Always display FormattingToolbar
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10.0),
+                        child: FormattingToolbar(
+                          isBoldActive: currentStyle.isBold,
+                          isUnderlineActive: currentStyle.isUnderline,
+                          isItalicActive: currentStyle.isItalic,
+                          isStrikethroughActive: currentStyle.isStrikethrough,
+                          onToggleBold: _toggleBold,
+                          onToggleUnderline: _toggleUnderline,
+                          onToggleItalic: _toggleItalic,
+                          onToggleStrikethrough: _toggleStrikethrough,
+                          onPickTextColor: _pickTextColor,
+                          onImportExcel: _importExcel,
+                          onExportExcel: _exportExcel,
+                          onChangeFontStyle: _changeFontStyle,
+                          onInsertToday: _insertToday,
+                          onInsertEdate: _insertEdate,
+                          onInsertNetworkdays: _insertNetworkdays,
+                          onInsertMin: _insertMin,
+                          onInsertMax: _insertMax,
+                          onDeleteRecord:
+                              _deleteRecord, // Add delete record functionality
+                          onInsertCountIf:
+                              _insertCountIf, // Add Count If functionality
+                          currentFontFamily: _currentFontFamily,
+                          isEnabled: _selectedCellKey != null,
+                          onInsertSigmoid: _insertSigmoid,
+                          onInsertIntegration: _insertIntegration,
+                          onUndo: _undo,
+                          onRedo: _redo,
+                          onCopy: _copyCellValue,
+                          onPaste: _pasteCellValue,
+                          canCopy: _selectedCellKey != null,
+                          canPaste: _selectedCellKey != null,
                         ),
                       ),
 
-                    // const SizedBox(height: 20), // Original spacing, adjust as needed
-                    if (_isLoading)
-                      const Expanded(
-                          child: Center(child: CircularProgressIndicator()))
-                    else if (_errorMessage != null)
-                      Expanded(
-                          child: Center(
-                              child: Text(_errorMessage!,
-                                  style: TextStyle(
-                                      color: Colors.red[700], fontSize: 16))))
-                    else if (_customers.isEmpty)
-                      Expanded(
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.info_outline,
-                                  color: Colors.grey[400], size: 48),
-                              const SizedBox(height: 10),
-                              Text('No customer data found on the server.',
-                                  style: TextStyle(
-                                      fontSize: 16, color: Colors.grey[600])),
-                              const SizedBox(height: 10),
-                              ElevatedButton.icon(
-                                icon: Icon(Icons.refresh),
-                                label: Text('Try Refreshing'),
-                                onPressed: _fetchDataFromServer,
-                                style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blueAccent,
-                                    foregroundColor: Colors.white),
+                      // Function Result Display
+                      if (_showFunctionResult && _functionResult != null)
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16.0),
+                          margin: const EdgeInsets.only(bottom: 10.0),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8.0),
+                            border: Border.all(
+                                color: _functionResultColor.withOpacity(0.5),
+                                width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _functionResultColor.withOpacity(0.1),
+                                blurRadius: 8,
+                                spreadRadius: 1,
                               )
                             ],
                           ),
-                        ),
-                      )
-                    else if (_displayedCustomers.isEmpty &&
-                        _customers.isNotEmpty)
-                      Expanded(
-                        child: Center(
                           child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.filter_list_off_rounded,
-                                  color: Colors.orange[400], size: 48),
-                              const SizedBox(height: 10),
-                              Text('No customers found.',
-                                  style: TextStyle(
-                                      fontSize: 16, color: Colors.orange[700]))
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Function Result:',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey[800],
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.close, size: 18),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    onPressed: () {
+                                      setState(() {
+                                        _showFunctionResult = false;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Builder(
+                                builder: (context) {
+                                  // Check if the result contains a calendar visualization
+                                  bool hasCalendarView =
+                                      _functionResult!.contains('\n\n');
+
+                                  if (hasCalendarView) {
+                                    // Split the message and the calendar view
+                                    List<String> parts =
+                                        _functionResult!.split('\n\n');
+                                    String message = parts[0];
+                                    String calendarView =
+                                        parts.length > 1 ? parts[1] : '';
+
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        // Main message with icon
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Icon(
+                                              message.contains('passed')
+                                                  ? Icons.warning_amber_rounded
+                                                  : message.contains('today')
+                                                      ? Icons.today_rounded
+                                                      : message.contains('left')
+                                                          ? Icons
+                                                              .event_available_rounded
+                                                          : Icons
+                                                              .info_outline_rounded,
+                                              color: _functionResultColor,
+                                              size: 24,
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Flexible(
+                                              child: Text(
+                                                message,
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: _functionResultColor,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        // Calendar visualization
+                                        if (calendarView.isNotEmpty)
+                                          Container(
+                                            margin:
+                                                const EdgeInsets.only(top: 16),
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[50],
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                  color: Colors.grey[300]!),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'Working Days Calendar:',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                    color: Colors.grey[800],
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  calendarView,
+                                                  style: TextStyle(
+                                                    fontFamily: 'monospace',
+                                                    fontSize: 13,
+                                                    height: 1.4,
+                                                    color: Colors.grey[800],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    );
+                                  } else {
+                                    // Regular message with icon (no calendar)
+                                    return Row(
+                                      children: [
+                                        Icon(
+                                          _functionResult!.contains('passed by')
+                                              ? Icons.warning_amber_rounded
+                                              : _functionResult!
+                                                      .contains('today')
+                                                  ? Icons.today_rounded
+                                                  : _functionResult!
+                                                          .contains('days left')
+                                                      ? Icons
+                                                          .event_available_rounded
+                                                      : Icons
+                                                          .info_outline_rounded,
+                                          color: _functionResultColor,
+                                          size: 24,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Flexible(
+                                          child: Text(
+                                            _functionResult!,
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: _functionResultColor,
+                                            ),
+                                            softWrap: true,
+                                            overflow: TextOverflow.visible,
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }
+                                },
+                              ),
                             ],
                           ),
                         ),
-                      )
-                    else
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              headingRowColor:
-                                  MaterialStateProperty.resolveWith<Color?>(
-                                      (Set<MaterialState> states) {
-                                return Theme.of(context)
-                                    .appBarTheme
-                                    .backgroundColor; // Match app bar color
-                              }),
-                              dataRowColor:
-                                  MaterialStateProperty.resolveWith<Color?>(
-                                      (Set<MaterialState> states) {
-                                return Theme.of(context)
-                                    .appBarTheme
-                                    .backgroundColor
-                                    ?.withOpacity(
-                                        0.8); // Slightly transparent app bar color
-                              }),
-                              border: TableBorder.all(
-                                  color: Theme.of(context).primaryColor,
-                                  width: 1),
-                              columnSpacing:
-                                  0, // We'll handle spacing with column widths
-                              sortColumnIndex: _sortColumnKey == null
-                                  ? null
-                                  : [
-                                      colId,
-                                      colName,
-                                      colDueDate,
-                                      colVehicleNumber,
-                                      colContactNumber,
-                                      colModel,
-                                      colInsurer
-                                    ].indexOf(_sortColumnKey!),
-                              sortAscending: _sortAscending,
-                              columns: [
-                                _buildInteractiveDataColumn('ID', colId),
-                                _buildInteractiveDataColumn('Name', colName),
-                                _buildInteractiveDataColumn(
-                                    'Due Date', colDueDate),
-                                _buildInteractiveDataColumn(
-                                    'Vehicle No.', colVehicleNumber),
-                                _buildInteractiveDataColumn(
-                                    'Contact No.', colContactNumber),
-                                _buildInteractiveDataColumn('Model', colModel),
-                                _buildInteractiveDataColumn(
-                                    'Insurer', colInsurer),
+
+                      // const SizedBox(height: 20), // Original spacing, adjust as needed
+                      if (_isLoading)
+                        const Expanded(
+                            child: Center(child: CircularProgressIndicator()))
+                      else if (_errorMessage != null)
+                        Expanded(
+                            child: Center(
+                                child: Text(_errorMessage!,
+                                    style: TextStyle(
+                                        color: Colors.red[700], fontSize: 16))))
+                      else if (_customers.isEmpty)
+                        Expanded(
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.info_outline,
+                                    color: Colors.grey[400], size: 48),
+                                const SizedBox(height: 10),
+                                Text('No customer data found on the server.',
+                                    style: TextStyle(
+                                        fontSize: 16, color: Colors.grey[600])),
+                                const SizedBox(height: 10),
+                                ElevatedButton.icon(
+                                  icon: Icon(Icons.refresh),
+                                  label: Text('Try Refreshing'),
+                                  onPressed: _fetchDataFromServer,
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blueAccent,
+                                      foregroundColor: Colors.white),
+                                )
                               ],
-                              rows: _displayedCustomers.map((customer) {
-                                return DataRow(
-                                  cells: [
-                                    _buildStyledCell(
-                                        customer.id, colId, customer.id),
-                                    _buildStyledCell(
-                                        customer.id, colName, customer.name),
-                                    _buildStyledCell(customer.id, colDueDate,
-                                        customer.dueDate),
-                                    _buildStyledCell(
-                                        customer.id,
-                                        colVehicleNumber,
-                                        customer.vehicleNumber),
-                                    _buildStyledCell(
-                                        customer.id,
-                                        colContactNumber,
-                                        customer.contactNumber),
-                                    _buildStyledCell(
-                                        customer.id, colModel, customer.model),
-                                    _buildStyledCell(customer.id, colInsurer,
-                                        customer.insurer),
+                            ),
+                          ),
+                        )
+                      else if (_displayedCustomers.isEmpty &&
+                          _customers.isNotEmpty)
+                        Expanded(
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.filter_list_off_rounded,
+                                    color: Colors.orange[400], size: 48),
+                                const SizedBox(height: 10),
+                                Text('No customers found.',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.orange[700]))
+                              ],
+                            ),
+                          ),
+                        )
+                      else
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              // Prevent deselection when clicking on the table
+                              // This stops the event from bubbling up to the parent GestureDetector
+                            },
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.vertical,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: DataTable(
+                                  headingRowColor:
+                                      MaterialStateProperty.resolveWith<Color?>(
+                                          (Set<MaterialState> states) {
+                                    return Theme.of(context)
+                                        .appBarTheme
+                                        .backgroundColor; // Match app bar color
+                                  }),
+                                  dataRowColor:
+                                      MaterialStateProperty.resolveWith<Color?>(
+                                          (Set<MaterialState> states) {
+                                    return Theme.of(context)
+                                        .appBarTheme
+                                        .backgroundColor
+                                        ?.withOpacity(
+                                            0.8); // Slightly transparent app bar color
+                                  }),
+                                  border: TableBorder.all(
+                                      color: Theme.of(context).primaryColor,
+                                      width: 1),
+                                  columnSpacing:
+                                      0, // We'll handle spacing with column widths
+                                  sortColumnIndex: _sortColumnKey == null
+                                      ? null
+                                      : [
+                                          colId,
+                                          colName,
+                                          colDueDate,
+                                          colVehicleNumber,
+                                          colContactNumber,
+                                          colModel,
+                                          colInsurer
+                                        ].indexOf(_sortColumnKey!),
+                                  sortAscending: _sortAscending,
+                                  columns: [
+                                    _buildInteractiveDataColumn('ID', colId),
+                                    _buildInteractiveDataColumn(
+                                        'Name', colName),
+                                    _buildInteractiveDataColumn(
+                                        'Due Date', colDueDate),
+                                    _buildInteractiveDataColumn(
+                                        'Vehicle No.', colVehicleNumber),
+                                    _buildInteractiveDataColumn(
+                                        'Contact No.', colContactNumber),
+                                    _buildInteractiveDataColumn(
+                                        'Model', colModel),
+                                    _buildInteractiveDataColumn(
+                                        'Insurer', colInsurer),
                                   ],
-                                );
-                              }).toList(),
+                                  rows: _displayedCustomers.map((customer) {
+                                    return DataRow(
+                                      cells: [
+                                        _buildStyledCell(
+                                            customer.id, colId, customer.id),
+                                        _buildStyledCell(customer.id, colName,
+                                            customer.name),
+                                        _buildStyledCell(customer.id,
+                                            colDueDate, customer.dueDate),
+                                        _buildStyledCell(
+                                            customer.id,
+                                            colVehicleNumber,
+                                            customer.vehicleNumber),
+                                        _buildStyledCell(
+                                            customer.id,
+                                            colContactNumber,
+                                            customer.contactNumber),
+                                        _buildStyledCell(customer.id, colModel,
+                                            customer.model),
+                                        _buildStyledCell(customer.id,
+                                            colInsurer, customer.insurer),
+                                      ],
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               floatingActionButton: Column(

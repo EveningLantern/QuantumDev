@@ -26,6 +26,10 @@ class FormattingToolbar extends StatelessWidget {
   final VoidCallback onInsertIntegration; // New callback for integration
   final VoidCallback onUndo; // New callback for undo
   final VoidCallback onRedo; // New callback for redo
+  final VoidCallback onCopy; // New callback for copy
+  final VoidCallback onPaste; // New callback for paste
+  final bool canCopy; // Whether copy is available
+  final bool canPaste; // Whether paste is available
   final String currentFontFamily;
   final VoidCallback onDeleteRecord; // New callback for record deletion
   final VoidCallback onInsertCountIf; // New callback for Count If function
@@ -53,8 +57,12 @@ class FormattingToolbar extends StatelessWidget {
     required this.onInsertIntegration, // Required parameter for integration
     required this.onUndo, // Required parameter for undo
     required this.onRedo, // Required parameter for redo
+    required this.onCopy, // Required parameter for copy
+    required this.onPaste, // Required parameter for paste
     required this.onDeleteRecord, // Required parameter for delete functionality
     required this.onInsertCountIf, // Required parameter for Count If function
+    this.canCopy = true, // Default to enabled
+    this.canPaste = true, // Default to enabled
     this.currentFontFamily = 'Arial',
     this.isEnabled = true, // Default to enabled
   });
@@ -136,6 +144,27 @@ class FormattingToolbar extends StatelessWidget {
 
               _buildDivider(),
 
+              // Copy/Paste Section
+              _buildSection([
+                IconButton(
+                  icon: const Icon(Icons.copy),
+                  tooltip:
+                      canCopy ? 'Copy (Ctrl+C)' : 'Copy - Select a cell first',
+                  color: canCopy ? Colors.blue[700] : Colors.grey[400],
+                  onPressed: canCopy ? onCopy : null,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.paste),
+                  tooltip: canPaste
+                      ? 'Paste (Ctrl+V)'
+                      : 'Paste - Select a cell first',
+                  color: canPaste ? Colors.green[700] : Colors.grey[400],
+                  onPressed: canPaste ? onPaste : null,
+                ),
+              ]),
+
+              _buildDivider(),
+
               // Import/Export Section
               _buildSection([
                 IconButton(
@@ -175,7 +204,11 @@ class FormattingToolbar extends StatelessWidget {
                             constraints: const BoxConstraints(maxWidth: 100),
                             child: Text(
                               currentFontFamily,
-                              style: const TextStyle(fontSize: 12),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors
+                                    .black87, // Fixed color unaffected by theme changes
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),

@@ -137,9 +137,72 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
   String _userName = 'Sagar';
   String _userEmail = '';
   String _userPhone = '';
-  String _userRole = '';
+  String _userRole = 'User'; // Default role
   String _userImagePath = 'assets/app_logo.jpg'; // Default image
   bool _isHoveringHeroSection = false;
+
+  // Available roles for dropdown
+  final List<String> _availableRoles = ['User', 'Admin'];
+
+  // Validation functions
+  String? _validatePhoneNumber(String? value) {
+    if (value == null || value.isEmpty) {
+      return null; // Allow empty phone number
+    }
+
+    // Remove any non-digit characters for validation
+    String digitsOnly = value.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (digitsOnly.length != 10) {
+      return 'Phone number must be exactly 10 digits';
+    }
+
+    return null;
+  }
+
+  String? _validateEmail(String? value) {
+    if (value == null || value.isEmpty) {
+      return null; // Allow empty email
+    }
+
+    // Check if email contains '@'
+    if (!value.contains('@')) {
+      return 'Email must contain @';
+    }
+
+    // Split email into parts
+    List<String> parts = value.split('@');
+    if (parts.length != 2) {
+      return 'Invalid email format';
+    }
+
+    String domain = parts[1];
+
+    // Check if domain ends with valid extensions
+    List<String> validExtensions = [
+      '.com',
+      '.edu.in',
+      '.co.in',
+      '.org',
+      '.net',
+      '.gov.in',
+      '.ac.in',
+      '.in',
+      '.edu',
+      '.gov',
+      '.mil',
+      '.biz',
+      '.info'
+    ];
+
+    bool hasValidExtension = validExtensions.any((ext) => domain.endsWith(ext));
+
+    if (!hasValidExtension) {
+      return 'Email must end with valid domain (.com, .edu.in, .co.in, etc.)';
+    }
+
+    return null;
+  }
 
   @override
   void initState() {
@@ -738,7 +801,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
         _userName = prefs.getString('user_name') ?? 'Sagar';
         _userEmail = prefs.getString('user_email') ?? '';
         _userPhone = prefs.getString('user_phone') ?? '';
-        _userRole = prefs.getString('user_role') ?? '';
+
+        // Validate loaded role - ensure it's in available roles list
+        String loadedRole = prefs.getString('user_role') ?? 'User';
+        _userRole = _availableRoles.contains(loadedRole) ? loadedRole : 'User';
+
         _userImagePath =
             prefs.getString('user_image_path') ?? 'assets/app_logo.jpg';
       });
@@ -1110,6 +1177,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
     final Color primaryColor = theme.colorScheme.primary;
     final Color textColor = theme.textTheme.bodyMedium?.color ?? Colors.black;
 
+    // Form key for validation
+    final GlobalKey<FormState> formKey = GlobalKey<FormState>();
+
     // Controllers for text fields
     final TextEditingController nameController =
         TextEditingController(text: _userName);
@@ -1117,8 +1187,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
         TextEditingController(text: _userEmail);
     final TextEditingController phoneController =
         TextEditingController(text: _userPhone);
-    final TextEditingController roleController =
-        TextEditingController(text: _userRole);
+
+    // Selected role for dropdown - ensure it's a valid option
+    String selectedRole =
+        _availableRoles.contains(_userRole) ? _userRole : 'User';
 
     showDialog(
       context: context,
@@ -1142,192 +1214,241 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
                 ),
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
-                  children: [
-                    Icon(
-                      Icons.settings,
-                      color: primaryColor,
-                      size: 24,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Profile Settings',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: textColor,
-                      ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(
-                        Icons.close,
-                        color: textColor.withOpacity(0.6),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 24),
-
-                // Profile Image Section
-                Center(
-                  child: Column(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
                     children: [
-                      Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: theme.colorScheme.surface,
-                          border: Border.all(
-                            color: primaryColor.withOpacity(0.3),
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: theme.shadowColor.withOpacity(0.2),
-                              blurRadius: 10,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(50),
-                          child: _buildImageWidget(_userImagePath, 100, 100),
+                      Icon(
+                        Icons.settings,
+                        color: primaryColor,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Profile Settings',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await _pickImage();
-                          // The dialog will automatically show the updated image
-                          // since setState is called in _pickImage
-                        },
-                        icon: Icon(Icons.camera_alt, color: primaryColor),
-                        label: Text(
-                          'Choose from Gallery',
-                          style: TextStyle(color: primaryColor),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(
+                          Icons.close,
+                          color: textColor.withOpacity(0.6),
                         ),
                       ),
                     ],
                   ),
-                ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-                // Form Fields
-                _buildTextField(
-                  controller: nameController,
-                  label: 'Name',
-                  icon: Icons.person,
-                  theme: theme,
-                  primaryColor: primaryColor,
-                  textColor: textColor,
-                ),
-
-                const SizedBox(height: 16),
-
-                _buildTextField(
-                  controller: emailController,
-                  label: 'Email',
-                  icon: Icons.email,
-                  theme: theme,
-                  primaryColor: primaryColor,
-                  textColor: textColor,
-                  keyboardType: TextInputType.emailAddress,
-                ),
-
-                const SizedBox(height: 16),
-
-                _buildTextField(
-                  controller: phoneController,
-                  label: 'Phone Number',
-                  icon: Icons.phone,
-                  theme: theme,
-                  primaryColor: primaryColor,
-                  textColor: textColor,
-                  keyboardType: TextInputType.phone,
-                ),
-
-                const SizedBox(height: 16),
-
-                _buildTextField(
-                  controller: roleController,
-                  label: 'Role',
-                  icon: Icons.work,
-                  theme: theme,
-                  primaryColor: primaryColor,
-                  textColor: textColor,
-                ),
-
-                const SizedBox(height: 32),
-
-                // Action Buttons
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(
-                        'Cancel',
-                        style: TextStyle(
-                          color: textColor.withOpacity(0.6),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    ElevatedButton(
-                      onPressed: () async {
-                        // Save the settings
-                        setState(() {
-                          _userName = nameController.text.trim().isEmpty
-                              ? 'Sagar'
-                              : nameController.text.trim();
-                          _userEmail = emailController.text.trim();
-                          _userPhone = phoneController.text.trim();
-                          _userRole = roleController.text.trim();
-                        });
-
-                        // Save to persistent storage
-                        await _saveUserData();
-
-                        Navigator.of(context).pop();
-
-                        // Show success message
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content:
-                                const Text('Profile updated successfully!'),
-                            backgroundColor: primaryColor,
-                            duration: const Duration(seconds: 2),
+                  // Profile Image Section
+                  Center(
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 100,
+                          height: 100,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: theme.colorScheme.surface,
+                            border: Border.all(
+                              color: primaryColor.withOpacity(0.3),
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: theme.shadowColor.withOpacity(0.2),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(50),
+                            child: _buildImageWidget(_userImagePath, 100, 100),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: () async {
+                            await _pickImage();
+                            // The dialog will automatically show the updated image
+                            // since setState is called in _pickImage
+                          },
+                          icon: Icon(Icons.camera_alt, color: primaryColor),
+                          label: Text(
+                            'Choose from Gallery',
+                            style: TextStyle(color: primaryColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Form Fields
+                  _buildTextField(
+                    controller: nameController,
+                    label: 'Name',
+                    icon: Icons.person,
+                    theme: theme,
+                    primaryColor: primaryColor,
+                    textColor: textColor,
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  _buildTextField(
+                    controller: emailController,
+                    label: 'Email',
+                    icon: Icons.email,
+                    theme: theme,
+                    primaryColor: primaryColor,
+                    textColor: textColor,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: _validateEmail,
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  _buildTextField(
+                    controller: phoneController,
+                    label: 'Phone Number',
+                    icon: Icons.phone,
+                    theme: theme,
+                    primaryColor: primaryColor,
+                    textColor: textColor,
+                    keyboardType: TextInputType.phone,
+                    validator: _validatePhoneNumber,
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Role Dropdown
+                  StatefulBuilder(
+                    builder: (context, setDropdownState) {
+                      return DropdownButtonFormField<String>(
+                        value: selectedRole,
+                        decoration: InputDecoration(
+                          labelText: 'Role',
+                          labelStyle:
+                              TextStyle(color: textColor.withOpacity(0.7)),
+                          prefixIcon: Icon(Icons.work, color: primaryColor),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                BorderSide(color: textColor.withOpacity(0.3)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                BorderSide(color: textColor.withOpacity(0.3)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                BorderSide(color: primaryColor, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: theme.colorScheme.surface,
+                        ),
+                        dropdownColor: theme.colorScheme.surface,
+                        style: TextStyle(color: textColor),
+                        items: _availableRoles.map((String role) {
+                          return DropdownMenuItem<String>(
+                            value: role,
+                            child: Text(
+                              role,
+                              style: TextStyle(color: textColor),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          if (newValue != null) {
+                            setDropdownState(() {
+                              selectedRole = newValue;
+                            });
+                          }
+                        },
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // Action Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: Text(
+                          'Cancel',
+                          style: TextStyle(
+                            color: textColor.withOpacity(0.6),
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
-                      child: const Text(
-                        'Save Changes',
-                        style: TextStyle(fontWeight: FontWeight.w600),
+                      const SizedBox(width: 16),
+                      ElevatedButton(
+                        onPressed: () async {
+                          // Validate the form
+                          if (formKey.currentState!.validate()) {
+                            // Save the settings
+                            setState(() {
+                              _userName = nameController.text.trim().isEmpty
+                                  ? 'Sagar'
+                                  : nameController.text.trim();
+                              _userEmail = emailController.text.trim();
+                              _userPhone = phoneController.text.trim();
+                              _userRole = selectedRole;
+                            });
+
+                            // Save to persistent storage
+                            await _saveUserData();
+
+                            Navigator.of(context).pop();
+
+                            // Show success message
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content:
+                                    const Text('Profile updated successfully!'),
+                                backgroundColor: primaryColor,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primaryColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Save Changes',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -1344,11 +1465,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
     required Color primaryColor,
     required Color textColor,
     TextInputType? keyboardType,
+    String? Function(String?)? validator,
   }) {
-    return TextField(
+    return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       style: TextStyle(color: textColor),
+      validator: validator,
       decoration: InputDecoration(
         labelText: label,
         labelStyle: TextStyle(color: textColor.withOpacity(0.7)),
@@ -1364,6 +1487,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: primaryColor, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.red, width: 1),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.red, width: 2),
         ),
         filled: true,
         fillColor: theme.colorScheme.surface,
