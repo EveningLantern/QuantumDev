@@ -3170,7 +3170,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                   .expand(), // Use constraints instead of width/height
               alignment: Alignment.centerLeft,
               padding:
-                  const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
+                  const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
               transform: (isHovered && !isSelected)
                   ? (Matrix4.identity()..scale(1.02))
                   : Matrix4.identity(),

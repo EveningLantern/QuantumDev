@@ -1127,47 +1127,47 @@ class _AdminDashboardPageState extends State<AdminDashboardPage>
                           ),
                         ),
                       ),
+
+                    // Settings button positioned below user info
+                    if (_isHoveringHeroSection)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: AnimatedOpacity(
+                          opacity: _isHoveringHeroSection ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 200),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: () => _showSettingsDialog(context),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surface
+                                      .withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: theme.shadowColor.withOpacity(0.2),
+                                      blurRadius: 8,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  Icons.settings,
+                                  color: primaryColor,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ],
             ),
-
-            // Settings icon (appears on hover)
-            if (_isHoveringHeroSection)
-              Positioned(
-                top: 16,
-                right: 16,
-                child: AnimatedOpacity(
-                  opacity: _isHoveringHeroSection ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () => _showSettingsDialog(context),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surface.withOpacity(0.8),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: theme.shadowColor.withOpacity(0.2),
-                              blurRadius: 8,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.settings,
-                          color: primaryColor,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
