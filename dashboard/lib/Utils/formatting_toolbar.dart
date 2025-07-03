@@ -33,6 +33,12 @@ class FormattingToolbar extends StatelessWidget {
   final String currentFontFamily;
   final VoidCallback onDeleteRecord; // New callback for record deletion
   final VoidCallback onInsertCountIf; // New callback for Count If function
+  final VoidCallback onAddPage; // New callback for adding a new page
+  final VoidCallback onPreviousPage; // New callback for navigating to previous page
+  final VoidCallback onNextPage; // New callback for navigating to next page
+  final bool canGoToPreviousPage; // Whether previous page navigation is available
+  final bool canGoToNextPage; // Whether next page navigation is available
+  final String currentPageName; // Current page name to display
 
   const FormattingToolbar({
     super.key,
@@ -61,6 +67,12 @@ class FormattingToolbar extends StatelessWidget {
     required this.onPaste, // Required parameter for paste
     required this.onDeleteRecord, // Required parameter for delete functionality
     required this.onInsertCountIf, // Required parameter for Count If function
+    required this.onAddPage, // Required parameter for adding new page
+    required this.onPreviousPage, // Required parameter for previous page navigation
+    required this.onNextPage, // Required parameter for next page navigation
+    this.canGoToPreviousPage = true, // Default to enabled
+    this.canGoToNextPage = true, // Default to enabled
+    this.currentPageName = 'Page 1', // Default page name
     this.canCopy = true, // Default to enabled
     this.canPaste = true, // Default to enabled
     this.currentFontFamily = 'Arial',
@@ -439,6 +451,46 @@ class FormattingToolbar extends StatelessWidget {
                   tooltip: 'Delete Record',
                   color: Colors.red[700],
                   onPressed: onDeleteRecord,
+                ),
+              ]),
+
+              _buildDivider(),
+
+              // Page Navigation Section
+              _buildSection([
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_ios),
+                  tooltip: 'Previous Page',
+                  color: canGoToPreviousPage ? Colors.blue[700] : Colors.grey[400],
+                  onPressed: canGoToPreviousPage ? onPreviousPage : null,
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(4.0),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: Text(
+                    currentPageName,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_forward_ios),
+                  tooltip: 'Next Page',
+                  color: canGoToNextPage ? Colors.blue[700] : Colors.grey[400],
+                  onPressed: canGoToNextPage ? onNextPage : null,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add New Page',
+                  color: Colors.green[700],
+                  onPressed: onAddPage,
                 ),
               ]),
             ],

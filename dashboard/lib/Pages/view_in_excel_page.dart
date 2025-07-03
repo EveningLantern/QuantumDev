@@ -14,6 +14,7 @@ import '../Utils/formatting_toolbar.dart'; // Your formatting toolbar
 import '../Utils/serach_filter.dart'; // Search and filter functionality
 import '../endpoints.dart'; // Backend endpoints
 import '../parsing/date_parsing.dart'; // For date parsing functions
+import 'blank_table_page.dart'; // For blank table pages
 
 // Custom Intent classes for keyboard shortcuts
 class CopyIntent extends Intent {
@@ -248,9 +249,16 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
   // --- Auto-deselect Timer ---
   Timer? _autoDeselectTimer;
 
+  // --- Page Management State Variables ---
+  List<Map<String, dynamic>> _pages = [];
+  int _currentPageIndex = 0;
+  static const String _defaultPageType = 'customer_data';
+  static const String _blankTablePageType = 'blank_table';
+
   @override
   void initState() {
     super.initState();
+    _initializePages();
     _fetchDataFromServer();
     _loadCellStyles(); // Load saved styles
     _fabAnimationController = AnimationController(
@@ -260,6 +268,228 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
     _fabScaleAnimation = Tween<double>(begin: 1.0, end: 0.8).animate(
         CurvedAnimation(
             parent: _fabAnimationController, curve: Curves.easeInOut));
+  }
+
+  // --- Page Management Methods ---
+  void _initializePages() {
+    _pages = [
+      {
+        'name': 'Customer Data',
+        'type': _defaultPageType,
+        'data': <String, dynamic>{},
+      }
+    ];
+  }
+
+  void _addNewPage() {
+    setState(() {
+      final newPageIndex = _pages.length + 1;
+      _pages.add({
+        'name': 'Table $newPageIndex',
+        'type': _blankTablePageType,
+        'data': <String, String>{},
+      });
+      _currentPageIndex = _pages.length - 1;
+    });
+  }
+
+  void _goToPreviousPage() {
+    if (_currentPageIndex > 0) {
+      setState(() {
+        _currentPageIndex--;
+      });
+    }
+  }
+
+  void _goToNextPage() {
+    if (_currentPageIndex < _pages.length - 1) {
+      setState(() {
+        _currentPageIndex++;
+      });
+    }
+  }
+
+  void _onBlankTableCellChanged(String pageName, String cellKey, String value) {
+    final currentPage = _pages[_currentPageIndex];
+    if (currentPage['type'] == _blankTablePageType) {
+      currentPage['data'][cellKey] = value;
+    }
+  }
+
+  void _onBlankTableCellSelected(String? cellKey) {
+    setState(() {
+      if (cellKey != null) {
+        // Format the cell key for blank table to distinguish from customer data
+        _selectedCellKey = 'blank_${cellKey}';
+      } else {
+        _selectedCellKey = null;
+      }
+    });
+  }
+
+  Widget _buildCurrentPageContent() {
+    if (_pages.isEmpty) {
+      return const Expanded(
+        child: Center(
+          child: Text('No pages available'),
+        ),
+      );
+    }
+
+    final currentPage = _pages[_currentPageIndex];
+    final pageType = currentPage['type'];
+
+    if (pageType == _blankTablePageType) {
+      // Show blank table page
+      return Expanded(
+        child: BlankTablePage(
+          pageName: currentPage['name'],
+          onCellChanged: _onBlankTableCellChanged,
+          onCellSelected: _onBlankTableCellSelected,
+        ),
+      );
+    } else {
+      // Show customer data page (original content)
+      return _buildCustomerDataContent();
+    }
+  }
+
+  Widget _buildCustomerDataContent() {
+    if (_isLoading) {
+      return const Expanded(
+        child: Center(child: CircularProgressIndicator()),
+      );
+    } else if (_errorMessage != null) {
+      return Expanded(
+        child: Center(
+          child: Text(
+            _errorMessage!,
+            style: TextStyle(color: Colors.red[700], fontSize: 16),
+          ),
+        ),
+      );
+    } else if (_customers.isEmpty) {
+      return Expanded(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.info_outline, color: Colors.grey[400], size: 48),
+              const SizedBox(height: 10),
+              Text('No customer data found on the server.',
+                  style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                icon: Icon(Icons.refresh),
+                label: Text('Try Refreshing'),
+                onPressed: _fetchDataFromServer,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  foregroundColor: Colors.white,
+                ),
+              )
+            ],
+          ),
+        ),
+      );
+    } else if (_displayedCustomers.isEmpty && _customers.isNotEmpty) {
+      return Expanded(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.filter_list_off_rounded,
+                  color: Colors.orange[400], size: 48),
+              const SizedBox(height: 10),
+              Text('No customers found.',
+                  style: TextStyle(fontSize: 16, color: Colors.orange[700]))
+            ],
+          ),
+        ),
+      );
+    } else {
+      return Expanded(
+        child: GestureDetector(
+          onTap: () {
+            // Prevent deselection when clicking on the table
+            // This stops the event from bubbling up to the parent GestureDetector
+          },
+          child: SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Container(
+                margin: EdgeInsets.zero,
+                padding: EdgeInsets.zero,
+                child: DataTable(
+                  headingRowColor: MaterialStateProperty.resolveWith<Color?>(
+                      (Set<MaterialState> states) {
+                    return Theme.of(context)
+                        .appBarTheme
+                        .backgroundColor; // Match app bar color
+                  }),
+                  dataRowColor: MaterialStateProperty.resolveWith<Color?>(
+                      (Set<MaterialState> states) {
+                    return Theme.of(context)
+                        .appBarTheme
+                        .backgroundColor
+                        ?.withOpacity(
+                            0.8); // Slightly transparent app bar color
+                  }),
+                  border: TableBorder.all(
+                      color: Theme.of(context).primaryColor, width: 1),
+                  columnSpacing: 0, // No spacing between columns
+                  horizontalMargin: 0, // Remove horizontal margins
+                  headingRowHeight: 40, // Compact header height
+                  dataRowHeight: 35, // Compact row height
+                  dividerThickness: 0, // Remove divider lines for tighter fit
+                  sortColumnIndex: _sortColumnKey == null
+                      ? null
+                      : [
+                          colId,
+                          colName,
+                          colDueDate,
+                          colVehicleNumber,
+                          colContactNumber,
+                          colModel,
+                          colInsurer
+                        ].indexOf(_sortColumnKey!),
+                  sortAscending: _sortAscending,
+                  columns: [
+                    _buildInteractiveDataColumn('ID', colId),
+                    _buildInteractiveDataColumn('Name', colName),
+                    _buildInteractiveDataColumn('Due Date', colDueDate),
+                    _buildInteractiveDataColumn(
+                        'Vehicle No.', colVehicleNumber),
+                    _buildInteractiveDataColumn(
+                        'Contact No.', colContactNumber),
+                    _buildInteractiveDataColumn('Model', colModel),
+                    _buildInteractiveDataColumn('Insurer', colInsurer),
+                  ],
+                  rows: _displayedCustomers.map((customer) {
+                    return DataRow(
+                      cells: [
+                        _buildStyledCell(customer.id, colId, customer.id),
+                        _buildStyledCell(customer.id, colName, customer.name),
+                        _buildStyledCell(
+                            customer.id, colDueDate, customer.dueDate),
+                        _buildStyledCell(customer.id, colVehicleNumber,
+                            customer.vehicleNumber),
+                        _buildStyledCell(customer.id, colContactNumber,
+                            customer.contactNumber),
+                        _buildStyledCell(customer.id, colModel, customer.model),
+                        _buildStyledCell(
+                            customer.id, colInsurer, customer.insurer),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -4474,6 +4704,15 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                           onPaste: _pasteCellValue,
                           canCopy: _selectedCellKey != null,
                           canPaste: _selectedCellKey != null,
+                          onAddPage: _addNewPage,
+                          onPreviousPage: _goToPreviousPage,
+                          onNextPage: _goToNextPage,
+                          canGoToPreviousPage: _currentPageIndex > 0,
+                          canGoToNextPage:
+                              _currentPageIndex < _pages.length - 1,
+                          currentPageName: _pages.isNotEmpty
+                              ? _pages[_currentPageIndex]['name']
+                              : 'Page 1',
                         ),
                       ),
 
@@ -4657,158 +4896,7 @@ class _ViewInExcelPageState extends State<ViewInExcelPage>
                         ),
 
                       // const SizedBox(height: 20), // Original spacing, adjust as needed
-                      if (_isLoading)
-                        const Expanded(
-                            child: Center(child: CircularProgressIndicator()))
-                      else if (_errorMessage != null)
-                        Expanded(
-                            child: Center(
-                                child: Text(_errorMessage!,
-                                    style: TextStyle(
-                                        color: Colors.red[700], fontSize: 16))))
-                      else if (_customers.isEmpty)
-                        Expanded(
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.info_outline,
-                                    color: Colors.grey[400], size: 48),
-                                const SizedBox(height: 10),
-                                Text('No customer data found on the server.',
-                                    style: TextStyle(
-                                        fontSize: 16, color: Colors.grey[600])),
-                                const SizedBox(height: 10),
-                                ElevatedButton.icon(
-                                  icon: Icon(Icons.refresh),
-                                  label: Text('Try Refreshing'),
-                                  onPressed: _fetchDataFromServer,
-                                  style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blueAccent,
-                                      foregroundColor: Colors.white),
-                                )
-                              ],
-                            ),
-                          ),
-                        )
-                      else if (_displayedCustomers.isEmpty &&
-                          _customers.isNotEmpty)
-                        Expanded(
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.filter_list_off_rounded,
-                                    color: Colors.orange[400], size: 48),
-                                const SizedBox(height: 10),
-                                Text('No customers found.',
-                                    style: TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.orange[700]))
-                              ],
-                            ),
-                          ),
-                        )
-                      else
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              // Prevent deselection when clicking on the table
-                              // This stops the event from bubbling up to the parent GestureDetector
-                            },
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.vertical,
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Container(
-                                  margin: EdgeInsets.zero,
-                                  padding: EdgeInsets.zero,
-                                  child: DataTable(
-                                    headingRowColor: MaterialStateProperty
-                                        .resolveWith<Color?>(
-                                            (Set<MaterialState> states) {
-                                      return Theme.of(context)
-                                          .appBarTheme
-                                          .backgroundColor; // Match app bar color
-                                    }),
-                                    dataRowColor: MaterialStateProperty
-                                        .resolveWith<Color?>(
-                                            (Set<MaterialState> states) {
-                                      return Theme.of(context)
-                                          .appBarTheme
-                                          .backgroundColor
-                                          ?.withOpacity(
-                                              0.8); // Slightly transparent app bar color
-                                    }),
-                                    border: TableBorder.all(
-                                        color: Theme.of(context).primaryColor,
-                                        width: 1),
-                                    columnSpacing:
-                                        0, // No spacing between columns
-                                    horizontalMargin:
-                                        0, // Remove horizontal margins
-                                    headingRowHeight:
-                                        40, // Compact header height
-                                    dataRowHeight: 35, // Compact row height
-                                    dividerThickness:
-                                        0, // Remove divider lines for tighter fit
-                                    sortColumnIndex: _sortColumnKey == null
-                                        ? null
-                                        : [
-                                            colId,
-                                            colName,
-                                            colDueDate,
-                                            colVehicleNumber,
-                                            colContactNumber,
-                                            colModel,
-                                            colInsurer
-                                          ].indexOf(_sortColumnKey!),
-                                    sortAscending: _sortAscending,
-                                    columns: [
-                                      _buildInteractiveDataColumn('ID', colId),
-                                      _buildInteractiveDataColumn(
-                                          'Name', colName),
-                                      _buildInteractiveDataColumn(
-                                          'Due Date', colDueDate),
-                                      _buildInteractiveDataColumn(
-                                          'Vehicle No.', colVehicleNumber),
-                                      _buildInteractiveDataColumn(
-                                          'Contact No.', colContactNumber),
-                                      _buildInteractiveDataColumn(
-                                          'Model', colModel),
-                                      _buildInteractiveDataColumn(
-                                          'Insurer', colInsurer),
-                                    ],
-                                    rows: _displayedCustomers.map((customer) {
-                                      return DataRow(
-                                        cells: [
-                                          _buildStyledCell(
-                                              customer.id, colId, customer.id),
-                                          _buildStyledCell(customer.id, colName,
-                                              customer.name),
-                                          _buildStyledCell(customer.id,
-                                              colDueDate, customer.dueDate),
-                                          _buildStyledCell(
-                                              customer.id,
-                                              colVehicleNumber,
-                                              customer.vehicleNumber),
-                                          _buildStyledCell(
-                                              customer.id,
-                                              colContactNumber,
-                                              customer.contactNumber),
-                                          _buildStyledCell(customer.id,
-                                              colModel, customer.model),
-                                          _buildStyledCell(customer.id,
-                                              colInsurer, customer.insurer),
-                                        ],
-                                      );
-                                    }).toList(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+                      _buildCurrentPageContent(),
                     ],
                   ),
                 ),
